@@ -31,9 +31,9 @@ async function runFiveMvpScenarios(harness: E2EHarness) {
 
   const article = await harness.runTool('getDocument', { source: 'currentPage', mode: 'article' });
   assert.equal(article.ok, true);
-  assert.match(String(article.content), /supervised browser agent/i);
+  assert.match(String(article.content), /capable browser agent/i);
   const summary = summarize(String(article.content));
-  assert.match(summary, /supervised browser agent/i);
+  assert.match(summary, /capable browser agent/i);
 
   const image = await harness.runTool('extractImage', { source: 'viewport', format: 'png' });
   assert.deepEqual(pick(image, ['ok', 'source', 'mediaType']), { ok: true, source: 'viewport', mediaType: 'image/png' });
@@ -97,7 +97,7 @@ async function testPersistedRecovery(sessionId: number) {
 
   const conversation = deriveConversation(snapshot.agentEvents);
   assert.deepEqual(conversation.map((message) => message.role), ['user', 'assistant']);
-  assert.match(conversation[1]?.text ?? '', /supervised browser agent/i);
+  assert.match(conversation[1]?.text ?? '', /capable browser agent/i);
 
   const sources = deriveSources(taskView.context, snapshot.agentEvents);
   assert(sources.some((source) => source.url === 'https://fixture.test/article'));
@@ -495,7 +495,7 @@ function createFixturePages() {
   };
 
   return new Map([
-    ['https://fixture.test/article', new FakePage('https://fixture.test/article', 'Taber Article', 'Taber runs a supervised browser agent in a side panel. Users can stop tasks and recover the event log.')],
+    ['https://fixture.test/article', new FakePage('https://fixture.test/article', 'Taber Article', 'Taber runs a capable browser agent in a side panel. Users can stop tasks and recover the event log.')],
     ['https://fixture.test/table', new FakePage('https://fixture.test/table', 'Plan Prices', 'Plan pricing table', [pricesTable])],
     ['https://fixture.test/a', new FakePage('https://fixture.test/a', 'Fixture A', 'Alpha metric: 10')],
     ['https://fixture.test/b', new FakePage('https://fixture.test/b', 'Fixture B', 'Beta metric: 20')],

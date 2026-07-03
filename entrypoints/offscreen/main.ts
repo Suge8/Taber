@@ -19,7 +19,7 @@ import { deriveModelMessages, estimateModelPromptTokens } from '../../lib/model-
 import { readSelectedConfiguredModel } from '../../lib/provider-config-flow';
 import { getProviderApiKey, getReasoningEffort, reasoningProviderOptions } from '../../lib/provider-store';
 
-const instructions = `You are Taber, a supervised browser agent. Use the available browser tools directly. Never expose raw chain-of-thought. Cite tool evidence when summarizing. Cookies are unavailable. Before interacting with a page based on prior context, re-observe or query the current page state.`;
+const instructions = `You are Taber, a capable browser agent. Use the available browser tools directly. The user can see your actions and stop the task at any time. Never expose raw chain-of-thought. Cite tool evidence when summarizing. Cookies are unavailable. Before interacting with a page based on prior context, re-observe or query the current page state.`;
 
 let runningTask:
   | {
