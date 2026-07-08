@@ -156,6 +156,82 @@ function testRemoteHtmlUsesSharedMarkdownRules() {
   }
 }
 
+async function testGetDocumentCurrentPageBoundaries() {
+  const { cleanup, html } = installDocumentMarkdownDom();
+  try {
+    const controller = createGetDocumentController({
+      async getCurrentTabId() { return 21; },
+      async executeInTab(tabId) {
+        assert.equal(tabId, 21);
+        return {
+          title: 'Boundary page',
+          url: 'https://example.test/boundary',
+          selection: '',
+          html: html.boundary,
+          visibleText: 'Runtime shell text Shadow document text',
+          interactiveCount: 1,
+          shadowRootCount: 1,
+          spaShell: true,
+          hints: ['Included 1 open shadow root(s); closed shadow roots are not readable.', '2 iframe/frame(s) detected; 1 same-origin readable, 1 cross-origin/inaccessible listed as metadata only. Frame content is reported under frames[] and is not mixed into the main document.', 'Dynamic SPA shell likely: article/HTML extraction may be sparse; use browser.snapshot, readVisibleText(), or queryText() for runtime-visible content.'],
+          frames: [
+            { number: 1, title: 'Same Frame', src: 'https://example.test/frame', rect: { x: 1, y: 2, width: 300, height: 120 }, sameOrigin: true, readable: true, text: 'Frame visible text', chars: 18, truncated: false },
+            { number: 2, title: 'Cross Frame', src: 'https://cross.test/frame', rect: { x: 3, y: 4, width: 320, height: 140 }, sameOrigin: false, readable: false, reason: 'Cross-origin or inaccessible frame; browser permissions do not allow reading this frame from the parent page.' },
+          ],
+        } as never;
+      },
+      async fetchText() { throw new Error('offline'); },
+      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+    });
+
+    const result = await controller.run({ source: 'currentPage', mode: 'page' });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.match(result.content, /Boundary main/);
+      assert.doesNotMatch(result.content, /Readable iframe|Frame body|Frame visible text|Cross Frame/);
+      assert(result.hints?.some((hint) => hint.includes('open shadow root')));
+      assert(result.hints?.some((hint) => hint.includes('Dynamic SPA shell')));
+      assert(result.hints?.some((hint) => hint.includes('Frame content is reported under frames[] and is not mixed into the main document')));
+      assert.equal(result.frames?.length, 2);
+      assert.equal(result.frames?.[0]?.readable, true);
+      assert.equal(result.frames?.[0]?.text, 'Frame visible text');
+      assert.equal(result.frames?.[0]?.chars, 18);
+      assert.equal(result.frames?.[1]?.readable, false);
+      assert.deepEqual(Object.keys(result.frames?.[0] as Record<string, unknown>).sort(), ['chars', 'readable', 'rect', 'sameOrigin', 'src', 'text', 'title', 'truncated', 'number'].sort());
+    }
+  } finally {
+    cleanup();
+  }
+}
+
+async function testGetDocumentEmptyMainDocumentWithReadableFrameSucceeds() {
+  const { cleanup } = installDocumentMarkdownDom();
+  try {
+    const result = await createGetDocumentController({
+      async getCurrentTabId() { return 22; },
+      async executeInTab() {
+        return {
+          url: 'https://example.test/frame-only',
+          selection: '',
+          html: 'taber:test-empty-html',
+          hints: ['1 iframe/frame(s) detected; 1 same-origin readable, 0 cross-origin/inaccessible listed as metadata only. Frame content is reported under frames[] and is not mixed into the main document.'],
+          frames: [{ number: 1, title: 'Only Frame', src: 'https://example.test/only-frame', rect: { x: 0, y: 0, width: 200, height: 100 }, sameOrigin: true, readable: true, text: 'Only frame text', chars: 15, truncated: false }],
+        } as never;
+      },
+      async fetchText() { throw new Error('offline'); },
+      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+    }).run({ source: 'currentPage', mode: 'page' });
+
+    assert.equal(result.ok, true, 'empty main document still succeeds when readable frame text is exposed under frames[]');
+    if (result.ok) {
+      assert.equal(result.content, '');
+      assert.equal(result.frames?.[0]?.text, 'Only frame text');
+      assert(result.hints?.some((hint) => hint.includes('Frame content is reported under frames[] and is not mixed into the main document')));
+    }
+  } finally {
+    cleanup();
+  }
+}
+
 async function testGetDocumentPageSnapshotConversion() {
   const { cleanup, html } = installDocumentMarkdownDom();
   try {
@@ -345,6 +421,7 @@ function installDocumentMarkdownDom() {
     remote: 'taber:test-remote-html',
     selection: 'taber:test-selection-html',
     reader: 'taber:test-reader-html',
+    boundary: 'taber:test-boundary-html',
   };
 
   class FakeText {
@@ -468,11 +545,16 @@ function installDocumentMarkdownDom() {
     return element('body', [element('article', [element('h1', ['Reader article']), element('p', ['Reader body'])])]);
   }
 
+  function boundaryBody() {
+    return element('body', [element('main', [element('p', ['Boundary main'])])]);
+  }
+
   const documents = new Map([
     [html.page, pageBody],
     [html.remote, remoteBody],
     [html.selection, selectionBody],
     [html.reader, readerBody],
+    [html.boundary, boundaryBody],
   ]);
   const globalObject = globalThis as Record<string, unknown>;
   const keys = ['Node', 'Element', 'HTMLTableElement', 'DOMParser'];
@@ -775,6 +857,14 @@ async function testDebuggerController() {
   assert.deepEqual(failed.requests.map((request: NetworkLog) => request.status ?? request.errorText), [500, 'net::ERR_FAILED']);
   assert.deepEqual(failed.requests.map((request: NetworkLog) => [request.url, request.method, request.type]), [['https://api.test/items', 'GET', 'Fetch'], ['https://api.test/fail', 'POST', 'XHR']]);
   assert.equal(typeof failed.requests[0]?.time, 'number');
+  const diagnostics = await controller.run({ action: 'diagnostics' });
+  assert('failedRequests' in diagnostics);
+  assert.equal(diagnostics.logs[0]?.text, 'boom');
+  assert.deepEqual(diagnostics.failedRequests.map((request: NetworkLog) => request.status ?? request.errorText), [500, 'net::ERR_FAILED']);
+  const accessibility = await controller.run({ action: 'accessibilitySnapshot', limit: 1 });
+  assert('nodes' in accessibility);
+  assert.deepEqual(accessibility.nodes, [{ nodeId: '1', role: 'RootWebArea', name: 'Example', childIds: ['2'] }]);
+  assert.equal(accessibility.truncated, true);
   const evaluated = await controller.run({ action: 'evaluate', expression: 'window.appState' });
   assert('value' in evaluated);
   assert.equal(evaluated.value, 42);
@@ -892,6 +982,7 @@ function createFakeDebuggerApi() {
       if (method === 'Runtime.evaluate' && expression.includes('cookieConsent')) return { result: { value: true } };
       if (method === 'Runtime.evaluate' && expression.includes('1 + 1')) return { result: { value: 2 } };
       if (method === 'Runtime.evaluate') return { result: { value: 42 } };
+      if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', role: { value: 'RootWebArea' }, name: { value: 'Example' }, childIds: ['2'] }, { nodeId: '2', role: { value: 'button' }, name: { value: 'Save' } }] };
       return {};
     },
     emit(source: { tabId: number }, method: string, params?: Record<string, unknown>) {
@@ -908,6 +999,8 @@ await testGetDocumentSelectionFallback();
 testDocumentMarkdownElementRules();
 testDocumentMarkdownTableRules();
 testRemoteHtmlUsesSharedMarkdownRules();
+await testGetDocumentCurrentPageBoundaries();
+await testGetDocumentEmptyMainDocumentWithReadableFrameSucceeds();
 await testGetDocumentPageSnapshotConversion();
 await testGetDocumentSelectionSnapshotFallback();
 await testGetDocumentReaderCurrentPageSnapshot();

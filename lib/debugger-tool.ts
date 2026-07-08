@@ -2,7 +2,7 @@ import { assertAllowedCdpMethod, assertNoCookieExposure, prepareCdpParams, wrapC
 
 export const debuggerRequestType = 'taber.debugger.request';
 
-export type DebuggerAction = 'attach' | 'consoleLogs' | 'networkLogs' | 'failedRequests' | 'evaluate' | 'cdp' | 'detach';
+export type DebuggerAction = 'attach' | 'consoleLogs' | 'networkLogs' | 'failedRequests' | 'diagnostics' | 'accessibilitySnapshot' | 'evaluate' | 'cdp' | 'detach';
 
 export type DebuggerInput = {
   action?: DebuggerAction;
@@ -15,23 +15,26 @@ export type DebuggerInput = {
 
 export type ConsoleLog = { time: number; level: string; text: string; url?: string };
 export type NetworkLog = { requestId: string; url: string; method?: string; status?: number; errorText?: string; type?: string; time: number };
+export type AccessibilityNode = { nodeId?: string; role?: string; name?: string; value?: string; description?: string; ignored?: boolean; childIds?: string[]; backendDOMNodeId?: number };
 
 export type DebuggerResult =
   | { action: DebuggerAction; attached: boolean; tabId: number }
   | { action: 'consoleLogs'; tabId: number; logs: ConsoleLog[] }
   | { action: 'networkLogs' | 'failedRequests'; tabId: number; requests: NetworkLog[] }
+  | { action: 'diagnostics'; tabId: number; logs: ConsoleLog[]; requests: NetworkLog[]; failedRequests: NetworkLog[] }
+  | { action: 'accessibilitySnapshot'; tabId: number; nodes: AccessibilityNode[]; truncated: boolean; limit: number }
   | { action: 'evaluate' | 'cdp'; tabId: number; value: unknown };
 
 export const debuggerInputJsonSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    action: { type: 'string', enum: ['attach', 'consoleLogs', 'networkLogs', 'failedRequests', 'evaluate', 'cdp', 'detach'], description: 'Debugger action. Defaults to failedRequests.' },
+    action: { type: 'string', enum: ['attach', 'consoleLogs', 'networkLogs', 'failedRequests', 'diagnostics', 'accessibilitySnapshot', 'evaluate', 'cdp', 'detach'], description: 'Debugger action. Defaults to failedRequests.' },
     tabId: { type: 'integer', minimum: 1 },
     expression: { type: 'string', description: 'Main world JavaScript expression for evaluate.' },
     method: { type: 'string', description: 'CDP method for cdp action. Cookie methods are blocked.' },
     params: { type: 'object', additionalProperties: true },
-    limit: { type: 'integer', minimum: 1, maximum: 200 },
+    limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Maximum logs, requests, or accessibility nodes returned.' },
   },
 } as const;
 
@@ -67,6 +70,8 @@ export function createDebuggerController(options: { debuggerApi: DebuggerApi; ge
     if (action === 'consoleLogs') return { action, tabId, logs: last(stateFor(tabId).consoleLogs, input.limit) };
     if (action === 'networkLogs') return { action, tabId, requests: last([...stateFor(tabId).networkLogs.values()], input.limit) };
     if (action === 'failedRequests') return { action, tabId, requests: last([...stateFor(tabId).networkLogs.values()].filter(isFailed), input.limit) };
+    if (action === 'diagnostics') return diagnostics(tabId, input.limit);
+    if (action === 'accessibilitySnapshot') return accessibilitySnapshot(tabId, input.limit);
     if (action === 'evaluate') return { action, tabId, value: await evaluate(tabId, input.expression) };
     return { action, tabId, value: await sendCdp(tabId, input.method, input.params) };
   }
@@ -126,6 +131,19 @@ export function createDebuggerController(options: { debuggerApi: DebuggerApi; ge
     const result = await options.debuggerApi.sendCommand({ tabId }, method, safeParams);
     if (method === 'Runtime.evaluate') rejectCookieEvaluationException(result);
     return result;
+  }
+
+  function diagnostics(tabId: number, limit?: number): DebuggerResult {
+    const state = stateFor(tabId);
+    const requests = [...state.networkLogs.values()];
+    return { action: 'diagnostics', tabId, logs: last(state.consoleLogs, limit), requests: last(requests, limit), failedRequests: last(requests.filter(isFailed), limit) };
+  }
+
+  async function accessibilitySnapshot(tabId: number, limit = 100): Promise<DebuggerResult> {
+    const result = await options.debuggerApi.sendCommand({ tabId }, 'Accessibility.getFullAXTree');
+    const rawNodes = isRecord(result) && Array.isArray(result.nodes) ? result.nodes : [];
+    const nodes = rawNodes.map(readAccessibilityNode).filter((node): node is AccessibilityNode => Boolean(node));
+    return { action: 'accessibilitySnapshot', tabId, nodes: nodes.slice(0, limit), truncated: nodes.length > limit, limit };
   }
 
   function handleEvent(tabId: number, method: string, params: Record<string, unknown>) {
@@ -275,6 +293,28 @@ function readRemoteValue(value: unknown) {
   return '';
 }
 
+function readAccessibilityNode(value: unknown): AccessibilityNode | undefined {
+  if (!isRecord(value)) return undefined;
+  const node: AccessibilityNode = {};
+  if (typeof value.nodeId === 'string') node.nodeId = value.nodeId;
+  if (typeof value.ignored === 'boolean') node.ignored = value.ignored;
+  if (Number.isInteger(value.backendDOMNodeId)) node.backendDOMNodeId = Number(value.backendDOMNodeId);
+  const role = readAccessibilityValue(value.role), name = readAccessibilityValue(value.name), nodeValue = readAccessibilityValue(value.value), description = readAccessibilityValue(value.description);
+  if (role) node.role = role;
+  if (name) node.name = name;
+  if (nodeValue) node.value = nodeValue;
+  if (description) node.description = description;
+  const childIds = Array.isArray(value.childIds) ? value.childIds.filter((id): id is string => typeof id === 'string') : [];
+  if (childIds.length) node.childIds = childIds;
+  return Object.keys(node).length ? node : undefined;
+}
+
+function readAccessibilityValue(value: unknown) {
+  if (isRecord(value) && 'value' in value) return String(value.value ?? '');
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return undefined;
+}
+
 function readRequestId(params: Record<string, unknown>) {
   if (typeof params.requestId === 'string') return params.requestId;
   throw new Error('Debugger event missing requestId');
@@ -286,7 +326,7 @@ function requireTabId(source: Debuggee) {
 }
 
 function readAction(value: unknown): DebuggerAction {
-  if (value === 'attach' || value === 'consoleLogs' || value === 'networkLogs' || value === 'failedRequests' || value === 'evaluate' || value === 'cdp' || value === 'detach') return value;
+  if (value === 'attach' || value === 'consoleLogs' || value === 'networkLogs' || value === 'failedRequests' || value === 'diagnostics' || value === 'accessibilitySnapshot' || value === 'evaluate' || value === 'cdp' || value === 'detach') return value;
   throw new Error(`Invalid debugger action: ${String(value)}`);
 }
 

@@ -28,6 +28,7 @@ async function testDispatchesAllowedAction() {
     tabs: createNamespace(['query', 'get', 'create', 'update', 'remove'], calls),
     scripting: createNamespace(['executeScript'], calls),
     userScripts: createNamespace(['execute'], calls),
+    webNavigation: createNamespace(['getAllFrames'], calls),
     debugger: createNamespace(['attach', 'detach', 'sendCommand'], calls),
   });
 

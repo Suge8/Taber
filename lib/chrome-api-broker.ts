@@ -8,6 +8,7 @@ export type ChromeApiAction =
   | 'tabs.remove'
   | 'scripting.executeScript'
   | 'userScripts.execute'
+  | 'webNavigation.getAllFrames'
   | 'debugger.attach'
   | 'debugger.detach'
   | 'debugger.sendCommand';
@@ -22,6 +23,7 @@ type CallableChromeApi = {
   tabs: Record<'query' | 'get' | 'create' | 'update' | 'remove', (...args: never[]) => Promise<unknown>>;
   scripting: { executeScript(...args: never[]): Promise<unknown> };
   userScripts: { execute(...args: never[]): Promise<unknown> };
+  webNavigation: { getAllFrames(...args: never[]): Promise<unknown> };
   debugger: Record<'attach' | 'detach' | 'sendCommand', (...args: never[]) => Promise<unknown>>;
 };
 
@@ -45,6 +47,8 @@ export function createChromeApiBroker(chromeApi: CallableChromeApi) {
         return chromeApi.scripting.executeScript(...args);
       case 'userScripts.execute':
         return chromeApi.userScripts.execute(...args);
+      case 'webNavigation.getAllFrames':
+        return chromeApi.webNavigation.getAllFrames(...args);
       case 'debugger.attach':
         return chromeApi.debugger.attach(...args);
       case 'debugger.detach':
@@ -82,6 +86,7 @@ const chromeApiActions: ChromeApiAction[] = [
   'tabs.remove',
   'scripting.executeScript',
   'userScripts.execute',
+  'webNavigation.getAllFrames',
   'debugger.attach',
   'debugger.detach',
   'debugger.sendCommand',
