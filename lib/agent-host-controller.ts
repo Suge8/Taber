@@ -1,3 +1,5 @@
+import type { AgentLocale } from './agent-instructions.ts';
+
 export const AGENT_HOST_IDLE_TIMEOUT_MS = 120_000;
 
 type OffscreenLifecycle = {
@@ -13,6 +15,15 @@ type Scheduler = {
 
 type HostMessageSender = (message: unknown) => Promise<unknown>;
 
+type StartTaskRequest = {
+  prompt: string;
+  sessionId?: number;
+  windowId?: number;
+  targetTabId?: number;
+  targetTab?: unknown;
+  locale?: AgentLocale;
+};
+
 export function createAgentHostController(options: {
   lifecycle: OffscreenLifecycle;
   sendToHost: HostMessageSender;
@@ -27,7 +38,7 @@ export function createAgentHostController(options: {
   let idleTimer: unknown;
   let taskActive = false;
 
-  async function startTask(request: { prompt: string; sessionId?: number; windowId?: number }) {
+  async function startTask(request: StartTaskRequest) {
     clearIdleTimer();
     if (!(await options.lifecycle.ensureDocument())) throw new Error('AgentHost offscreen document was not created');
     const response = await options.sendToHost({ type: 'taber.agent.startTask', ...request });

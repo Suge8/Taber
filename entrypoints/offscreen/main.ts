@@ -1,9 +1,11 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { isLoopFinished, ToolLoopAgent } from 'ai';
 import { browser } from 'wxt/browser';
+import { isOperableTab } from '../../lib/active-tab';
 import { browserPageScriptConsentKey } from '../../lib/browser-access';
 import { createAgentToolPromptEstimateText, createAgentTools } from '../../lib/agent-tools';
 import { AGENT_HOST_IDLE_TIMEOUT_MS } from '../../lib/agent-host-controller';
+import { collectAgentResponseText } from '../../lib/agent-stream';
 import {
   appendAgentEvent,
   createSession,
@@ -13,20 +15,27 @@ import {
   type AgentEvent,
 } from '../../lib/db';
 import { compactContext, contextLimit, needsCompaction } from '../../lib/context-compaction';
-import { createCodexLanguageModel } from '../../lib/codex-runtime';
+import { codexProviderOptions, createCodexLanguageModel } from '../../lib/codex-runtime';
 import { readFreshCodexTokens } from '../../lib/codex-provider';
 import { deriveModelMessages, estimateModelPromptTokens } from '../../lib/model-context';
+import { createOpenAIApiLanguageModel, openAIProviderOptions } from '../../lib/openai-runtime';
+import { readFreshXaiTokens } from '../../lib/xai-provider';
+import { createXaiLanguageModel, xaiProviderOptions } from '../../lib/xai-runtime';
 import { readSelectedConfiguredModel } from '../../lib/provider-config-flow';
-import { getProviderApiKey, getReasoningEffort, reasoningProviderOptions } from '../../lib/provider-store';
+import { getProviderApiKey, getReasoningEffort, reasoningProviderOptionsForModel } from '../../lib/provider-store';
+import { AGENT_INSTRUCTIONS_VERSION, instructionsByLocale, readAgentLocale, type AgentLocale } from '../../lib/agent-instructions';
 
-const instructions = `You are Taber, a capable browser agent. Use the available browser tools directly. The user can see your actions and stop the task at any time. Never expose raw chain-of-thought. Cite tool evidence when summarizing. Cookies are unavailable. Before interacting with a page based on prior context, re-observe or query the current page state.`;
+type TargetTabContext = { id: number; windowId?: number; title?: string; url?: string; favIconUrl?: string };
 
 let runningTask:
   | {
       abortController: AbortController;
       sessionId: number;
       taskId: string;
+      targetTabId: number;
+      targetTab: TargetTabContext;
       windowId?: number;
+      fatalError?: string;
     }
   | undefined;
 let idleCloseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -42,6 +51,18 @@ void initializeDatabase()
       if (message.type === 'taber.agent.stopTask') {
         void stopTask().then(sendResponse, sendError(sendResponse));
         return true;
+      }
+      if (message.type === 'taber.agent.switchTarget') {
+        void switchTarget(message).then(sendResponse, sendError(sendResponse));
+        return true;
+      }
+      if (message.type === 'taber.background.tabRemoved') {
+        handleTargetTabRemoved(message);
+        return false;
+      }
+      if (message.type === 'taber.background.tabUpdated') {
+        handleTargetTabUpdated(message);
+        return false;
       }
       return false;
     });
@@ -63,12 +84,15 @@ async function startTask(message: Record<string, unknown>) {
   const sessionId = await resolveSessionId(message.sessionId, prompt);
   const taskId = crypto.randomUUID();
   const windowId = readWindowId(message.windowId);
+  const locale = readAgentLocale(message.locale);
+  const targetTab = readTargetTab(message.targetTab, message.targetTabId, windowId);
   const abortController = new AbortController();
-  runningTask = { abortController, sessionId, taskId, windowId };
+  runningTask = { abortController, sessionId, taskId, targetTabId: targetTab.id, targetTab, windowId };
 
+  showTargetOverlay(targetTab.id);
   void notifyBackground('taber.background.agentActive');
-  await emitAgentEvent(sessionId, 'task.started', { taskId, prompt, context: await readActiveTabContext(windowId) });
-  void runAgentTask({ abortController, prompt, sessionId, taskId, windowId });
+  await emitAgentEvent(sessionId, 'task.started', { taskId, prompt, context: targetTab, instructionsVersion: AGENT_INSTRUCTIONS_VERSION });
+  void runAgentTask({ abortController, prompt, sessionId, taskId, targetTabId: targetTab.id, windowId, locale });
 
   return { sessionId, taskId };
 }
@@ -76,8 +100,37 @@ async function startTask(message: Record<string, unknown>) {
 async function stopTask() {
   if (!runningTask) return { stopped: false };
   runningTask.abortController.abort();
+  hideTargetOverlay(runningTask.targetTabId);
   await emitAgentEvent(runningTask.sessionId, 'task.stopRequested', { taskId: runningTask.taskId });
   return { stopped: true, taskId: runningTask.taskId };
+}
+
+async function switchTarget(message: Record<string, unknown>) {
+  if (!runningTask) throw new Error('No running Taber task');
+  const targetTab = readTargetTab(message.targetTab, message.targetTabId, readWindowId(message.windowId) ?? runningTask.windowId);
+  if (!isOperableTab(targetTab)) throw new Error(`Target tab is not operable: ${targetTab.url ?? targetTab.id}`);
+  if (targetTab.id === runningTask.targetTabId) return { changed: false, taskId: runningTask.taskId, targetTab };
+  await updateRunningTarget(runningTask.sessionId, runningTask.taskId, { toTabId: targetTab.id, reason: readString(message.reason) || 'userCurrentTab', tab: targetTab });
+  return { changed: true, taskId: runningTask.taskId, targetTab };
+}
+
+function handleTargetTabRemoved(message: Record<string, unknown>) {
+  const tabId = readPositiveInteger(message.tabId);
+  if (!runningTask || tabId !== runningTask.targetTabId) return;
+  void failRunningTask(runningTask.taskId, `Target tab is no longer available: ${tabId}`);
+}
+
+function handleTargetTabUpdated(message: Record<string, unknown>) {
+  if (!runningTask) return;
+  const tab = readTargetTab(message.tab, undefined, runningTask.windowId);
+  if (tab.id !== runningTask.targetTabId) return;
+  if (!isOperableTab(tab)) {
+    hideTargetOverlay(tab.id);
+    void failRunningTask(runningTask.taskId, `Target tab is not operable: ${tab.url ?? tab.id}`);
+    return;
+  }
+  runningTask.targetTab = tab;
+  showTargetOverlay(tab.id);
 }
 
 async function runAgentTask(task: {
@@ -85,10 +138,13 @@ async function runAgentTask(task: {
   prompt: string;
   sessionId: number;
   taskId: string;
+  targetTabId: number;
   windowId?: number;
+  locale: AgentLocale;
 }) {
   try {
-    const runtime = await createConfiguredRuntime(task.sessionId, task.taskId, task.windowId);
+    const instructions = instructionsByLocale[task.locale];
+    const runtime = await createConfiguredRuntime(task.sessionId, task.taskId, task.windowId, task.targetTabId, instructions);
     let events = (await readSessionSnapshot(task.sessionId)).agentEvents;
     const budget = { contextWindowTokens: runtime.modelRecord.contextWindowTokens, instructions, toolPromptText: runtime.toolPromptText };
     const compacted = await compactContext({
@@ -104,36 +160,32 @@ async function runAgentTask(task: {
     if (needsCompaction(events, task.taskId, budget) || estimateModelPromptTokens({ instructions, toolPromptText: runtime.toolPromptText, messages }) > contextLimit(runtime.modelRecord.contextWindowTokens)) throw new Error('Context is too large for the selected model. Choose a larger context model or start a new session.');
     const result = await runtime.agent.stream({ messages, abortSignal: task.abortController.signal });
     const messageId = crypto.randomUUID();
-    let text = '';
-    let messageCreated = false;
-    for await (const part of result.fullStream) {
-      if (part.type === 'error') throw part.error;
-      if (part.type === 'abort') throw new Error(part.reason ?? 'Task aborted');
-      if (part.type !== 'text-delta') continue;
-      if (!messageCreated) {
-        await emitAgentEvent(task.sessionId, 'message.created', { taskId: task.taskId, messageId, role: 'assistant', text: '' });
-        messageCreated = true;
-      }
-      text += part.text;
-      await emitAgentEvent(task.sessionId, 'message.appended', { taskId: task.taskId, messageId, delta: part.text });
-    }
-    if (!messageCreated) {
-      text = await result.text;
-      if (text) {
-        await emitAgentEvent(task.sessionId, 'message.created', { taskId: task.taskId, messageId, role: 'assistant', text: '' });
-        await emitAgentEvent(task.sessionId, 'message.appended', { taskId: task.taskId, messageId, delta: text });
-      }
-    }
+    const text = await collectAgentResponseText(result, {
+      createMessage: () => emitAgentEvent(task.sessionId, 'message.created', { taskId: task.taskId, messageId, role: 'assistant', text: '' }),
+      appendText: (delta) => emitAgentEvent(task.sessionId, 'message.appended', { taskId: task.taskId, messageId, delta }),
+      startReasoning: ({ reasoningId }) => emitAgentEvent(task.sessionId, 'reasoning.started', { taskId: task.taskId, reasoningId }),
+      appendReasoning: ({ reasoningId, delta }) => emitAgentEvent(task.sessionId, 'reasoning.appended', { taskId: task.taskId, reasoningId, delta }),
+      completeReasoning: ({ reasoningId }) => emitAgentEvent(task.sessionId, 'reasoning.completed', { taskId: task.taskId, reasoningId }),
+      startToolInput: ({ toolCallId, toolName, title }) => emitAgentEvent(task.sessionId, 'tool.input.started', { taskId: task.taskId, toolCallId, toolName, title }),
+      appendToolInput: ({ toolCallId, delta }) => emitAgentEvent(task.sessionId, 'tool.input.appended', { taskId: task.taskId, toolCallId, delta }),
+      completeToolInput: ({ toolCallId, toolName, input, title }) => emitAgentEvent(task.sessionId, 'tool.input.completed', { taskId: task.taskId, toolCallId, toolName, input, title }),
+    });
     if (task.abortController.signal.aborted) throw new Error('Task aborted');
     await emitAgentEvent(task.sessionId, 'task.completed', { taskId: task.taskId, text });
   } catch (error) {
-    if (task.abortController.signal.aborted) {
+    const fatalError = runningTask?.taskId === task.taskId ? runningTask.fatalError : undefined;
+    if (fatalError) {
+      await emitAgentEvent(task.sessionId, 'task.failed', { taskId: task.taskId, error: fatalError });
+    } else if (task.abortController.signal.aborted) {
       await emitAgentEvent(task.sessionId, 'task.cancelled', { taskId: task.taskId });
     } else {
       await emitAgentEvent(task.sessionId, 'task.failed', { taskId: task.taskId, error: stringifyError(error) });
     }
   } finally {
-    if (runningTask?.taskId === task.taskId) runningTask = undefined;
+    if (runningTask?.taskId === task.taskId) {
+      hideTargetOverlay(runningTask.targetTabId);
+      runningTask = undefined;
+    }
     scheduleIdleClose();
     void notifyBackground('taber.background.agentIdle');
   }
@@ -153,12 +205,14 @@ function clearIdleCloseTimer() {
   idleCloseTimer = undefined;
 }
 
-async function createConfiguredRuntime(sessionId: number, taskId: string, windowId?: number) {
+async function createConfiguredRuntime(sessionId: number, taskId: string, windowId: number | undefined, targetTabId: number, instructions: string) {
   const modelRecord = await readSelectedModel();
   const providerRecord = await database.providers.get(modelRecord.providerId);
   if (!providerRecord) throw new Error(`Model provider not found: ${modelRecord.providerId}`);
 
   const reasoningEffort = await getReasoningEffort();
+  const needsApiKey = providerRecord.kind !== 'openaiCodex' && providerRecord.kind !== 'xaiSub';
+  const apiKey = needsApiKey ? await getProviderApiKey(providerRecord.id) : '';
   const model = providerRecord.kind === 'openaiCodex'
     ? createCodexLanguageModel({
         modelId: modelRecord.name,
@@ -168,12 +222,37 @@ async function createConfiguredRuntime(sessionId: number, taskId: string, window
         supportedReasoningEfforts: modelRecord.supportedReasoningEfforts,
         auth: () => readFreshCodexTokens(providerRecord.id),
       })
-    : createOpenAICompatible({
-        name: providerRecord.name,
-        baseURL: providerRecord.baseURL,
-        apiKey: await getProviderApiKey(providerRecord.id),
-      })(modelRecord.name);
-  const providerOptions = providerRecord.kind === 'openaiCodex' ? undefined : reasoningProviderOptions(reasoningEffort);
+    : providerRecord.kind === 'xaiSub'
+      ? createXaiLanguageModel({
+          modelId: modelRecord.name,
+          providerName: providerRecord.name,
+          baseURL: providerRecord.baseURL,
+          reasoningEffort,
+          supportedReasoningEfforts: modelRecord.supportedReasoningEfforts,
+          auth: async () => {
+            const tokens = await readFreshXaiTokens(providerRecord.id);
+            return { accessToken: tokens.accessToken };
+          },
+        })
+      : providerRecord.kind === 'openaiApiKey'
+        ? createOpenAIApiLanguageModel({
+            modelId: modelRecord.name,
+            providerName: providerRecord.name,
+            baseURL: providerRecord.baseURL,
+            apiKey,
+          })
+        : createOpenAICompatible({
+            name: providerRecord.name,
+            baseURL: providerRecord.baseURL,
+            apiKey,
+          })(modelRecord.name);
+  const providerOptions = providerRecord.kind === 'openaiCodex'
+    ? codexProviderOptions(reasoningEffort)
+    : providerRecord.kind === 'xaiSub'
+      ? xaiProviderOptions(reasoningEffort)
+      : providerRecord.kind === 'openaiApiKey'
+        ? openAIProviderOptions(reasoningEffort, modelRecord.supportedReasoningEfforts, modelRecord.name)
+        : reasoningProviderOptionsForModel(reasoningEffort, modelRecord.supportedReasoningEfforts, modelRecord.name);
   const browserJsEnabled = await readBrowserJsEnabled();
   const toolPromptText = createAgentToolPromptEstimateText({ browserJsEnabled });
   return {
@@ -189,8 +268,12 @@ async function createConfiguredRuntime(sessionId: number, taskId: string, window
         sessionId,
         taskId,
         windowId,
+        targetTabId,
+        getTargetTabId: () => runningTask?.taskId === taskId ? runningTask.targetTabId : targetTabId,
         sendMessage: (message) => browser.runtime.sendMessage(message),
         emitEvent: (type, payload) => emitAgentEvent(sessionId, type, payload),
+        onTargetChanged: (change) => updateRunningTarget(sessionId, taskId, change),
+        onTargetUnavailable: (error) => failRunningTask(taskId, error),
         browserJsEnabled,
       }),
     }),
@@ -214,10 +297,34 @@ async function resolveSessionId(value: unknown, prompt: string) {
   return session.id;
 }
 
-async function readActiveTabContext(windowId?: number) {
-  const tab = await browser.runtime.sendMessage({ type: 'taber.background.currentTab', windowId }).catch(() => undefined);
-  if (!isRecord(tab)) return undefined;
-  return { id: tab.id, windowId: tab.windowId, title: tab.title, url: tab.url, favIconUrl: tab.favIconUrl };
+async function updateRunningTarget(sessionId: number, taskId: string, change: { fromTabId?: number; toTabId: number; reason: string; tab?: unknown }) {
+  if (!runningTask || runningTask.taskId !== taskId) return;
+  const targetTab = readTargetTab(change.tab, change.toTabId, runningTask.windowId);
+  const fromTabId = change.fromTabId ?? runningTask.targetTabId;
+  if (fromTabId !== targetTab.id) hideTargetOverlay(fromTabId);
+  runningTask.targetTabId = targetTab.id;
+  runningTask.targetTab = targetTab;
+  if (fromTabId !== targetTab.id) showTargetOverlay(targetTab.id);
+  await emitAgentEvent(sessionId, 'task.targetChanged', { taskId, fromTabId, toTabId: targetTab.id, reason: change.reason, tab: targetTab });
+}
+
+async function failRunningTask(taskId: string, error: string) {
+  if (!runningTask || runningTask.taskId !== taskId || runningTask.fatalError) return;
+  runningTask.fatalError = error;
+  runningTask.abortController.abort();
+}
+
+function readTargetTab(value: unknown, fallbackTabId: unknown, fallbackWindowId?: number): TargetTabContext {
+  const record = isRecord(value) ? value : {};
+  const id = readPositiveInteger(record.id) ?? readPositiveInteger(fallbackTabId);
+  if (!id) throw new Error('Task target tab is required');
+  return {
+    id,
+    windowId: readPositiveInteger(record.windowId) ?? fallbackWindowId,
+    title: readString(record.title),
+    url: readString(record.url),
+    favIconUrl: readString(record.favIconUrl),
+  };
 }
 
 async function emitAgentEvent(sessionId: number, type: string, payload: unknown) {
@@ -231,6 +338,28 @@ function readWindowId(value: unknown) {
   return Number.isInteger(value) && Number(value) > 0 ? Number(value) : undefined;
 }
 
+function readPositiveInteger(value: unknown) {
+  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function showTargetOverlay(tabId: number) {
+  sendTargetOverlayCommand(tabId, { action: 'show', message: 'Taber 正在控制此页', iconUrl: browser.runtime.getURL('/icons/icon-24.png') });
+}
+
+function hideTargetOverlay(tabId: number) {
+  sendTargetOverlayCommand(tabId, { action: 'hide' });
+}
+
+function sendTargetOverlayCommand(tabId: number, command: unknown) {
+  void browser.runtime.sendMessage({ type: 'taber.browserRepl.scriptingCommand', tabId, command: { helper: 'controlOverlay', args: [command], timeoutMs: 3_000 } }).then((response) => {
+    if (isRecord(response) && typeof response.error === 'string') console.warn(`Taber overlay skipped for tab ${tabId}: ${response.error}`);
+  }, (error) => console.warn(`Taber overlay skipped for tab ${tabId}: ${stringifyError(error)}`));
+}
+
 function notifyBackground(type: string) {
   return browser.runtime.sendMessage({ type }).catch(() => undefined);
 }
@@ -240,7 +369,9 @@ function sendError(sendResponse: (response?: unknown) => void) {
 }
 
 function stringifyError(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  const message = isRecord(error) ? readString(error.message) : undefined;
+  return message ?? String(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
