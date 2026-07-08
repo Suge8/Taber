@@ -1,10 +1,20 @@
 import { database, type Model, type Provider, type ProviderCredential, type ProviderCredentialKind, type ProviderKind } from './db.ts';
 import { CodexAuthError, type CodexAuthTokens, type CodexDiscoveredModel, selectDefaultCodexModel } from './codex-auth.ts';
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, normalizeContextWindowTokens } from './model-catalog.ts';
+import { apiKeyProviderKind } from './provider-kind.ts';
+import { normalizeSupportedReasoningEfforts, readReasoningEffortLevel } from './reasoning-effort.ts';
+import {
+  XAI_API_BASE_URL,
+  XAI_MODELS,
+  type XaiAuthTokens,
+} from './xai-auth.ts';
 
 export const SELECTED_MODEL_KEY = 'selectedModelId';
 export const OPENAI_CODEX_PROVIDER_NAME = 'ChatGPT subscription';
 export const OPENAI_CODEX_PROVIDER_BASE_URL = 'https://chatgpt.com/backend-api/codex';
+export const XAI_SUB_PROVIDER_NAME = 'xAI subscription';
+export const XAI_SUB_PROVIDER_BASE_URL = XAI_API_BASE_URL;
+export { XAI_API_BASE_URL, XAI_DEFAULT_MODEL_ID } from './xai-auth.ts';
 
 export type CodexCredentialValue = {
   accessToken: string;
@@ -16,10 +26,22 @@ export type CodexCredentialValue = {
   planType?: string;
 };
 
+export type XaiCredentialValue = {
+  accessToken: string;
+  refreshToken: string;
+  idToken?: string;
+  expiresAt: number;
+  email?: string;
+  name?: string;
+};
+
 export type ProviderConnectionModelInput = {
   id?: number | null;
   name: string;
   contextWindowTokens?: number;
+  displayName?: string;
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
 };
 
 export type CreateProviderConnectionInput = {
@@ -44,7 +66,7 @@ export async function createProviderConnection(input: CreateProviderConnectionIn
   const now = Date.now();
   return database.transaction('rw', database.providers, database.providerCredentials, database.models, database.settings, async () => {
     const providerId = Number(await database.providers.add({
-      kind: input.kind ?? 'openaiCompatible',
+      kind: input.kind ?? apiKeyProviderKind(input.baseURL),
       name: input.name.trim(),
       baseURL: input.baseURL.trim(),
       createdAt: now,
@@ -82,36 +104,6 @@ export async function deleteProviderConnection(providerId: number): Promise<{ re
     await database.providers.delete(providerId);
     const nextSelectedModelId = await reconcileSelectedModel({ removedModelIds });
     return { removedModelIds, nextSelectedModelId };
-  });
-}
-
-export async function saveProviderModel(input: { providerId: number; name: string; contextWindowTokens?: number }): Promise<Model> {
-  validateModel(input);
-  return database.transaction('rw', database.providers, database.providerCredentials, database.models, database.settings, async () => {
-    await requireProvider(input.providerId);
-    const model = await addProviderModel(input.providerId, input);
-    await reconcileSelectedModel({ preferredModelIds: [model.id] });
-    return model;
-  });
-}
-
-export async function updateProviderModel(modelId: number, patch: { name?: string; contextWindowTokens?: number }): Promise<Model> {
-  const existing = await requireModel(modelId);
-  const next = modelUpdatePatch(patch);
-  validateModel({
-    providerId: existing.providerId,
-    name: next.name ?? existing.name,
-    contextWindowTokens: next.contextWindowTokens ?? existing.contextWindowTokens,
-  });
-  await database.models.update(modelId, next);
-  return requireModel(modelId);
-}
-
-export async function deleteProviderModel(modelId: number): Promise<{ nextSelectedModelId: number | null }> {
-  return database.transaction('rw', database.providerCredentials, database.models, database.settings, async () => {
-    await requireModel(modelId);
-    await database.models.delete(modelId);
-    return { nextSelectedModelId: await reconcileSelectedModel({ removedModelIds: [modelId] }) };
   });
 }
 
@@ -166,6 +158,46 @@ export async function signOutOpenAICodex(providerId: number): Promise<{ nextSele
     if (provider.kind !== 'openaiCodex') throw new Error(`Provider is not OpenAI Codex: ${providerId}`);
     await database.providerCredentials.delete(providerId);
     return { nextSelectedModelId: await reconcileSelectedModel() };
+  });
+}
+
+export async function saveXaiSubConnection(input: { tokens: XaiAuthTokens; now?: number }) {
+  const now = input.now ?? Date.now();
+  return database.transaction('rw', database.providers, database.providerCredentials, database.models, database.settings, async () => {
+    const provider = await upsertXaiProvider(now);
+    await saveXaiCredential(provider.id, input.tokens, now);
+    const models = await saveXaiModelRecords(provider.id, now);
+    await selectXaiDefaultIfNeeded(models);
+    return { provider: await requireProvider(provider.id), models, selectedModelId: await readSelectedModelId() };
+  });
+}
+
+export async function signOutXaiSub(providerId: number): Promise<{ nextSelectedModelId: number | null }> {
+  return database.transaction('rw', database.providers, database.providerCredentials, database.models, database.settings, async () => {
+    const provider = await requireProvider(providerId);
+    if (provider.kind !== 'xaiSub') throw new Error(`Provider is not xAI subscription: ${providerId}`);
+    await database.providerCredentials.delete(providerId);
+    return { nextSelectedModelId: await reconcileSelectedModel() };
+  });
+}
+
+export async function saveXaiCredential(providerId: number, tokens: XaiAuthTokens, updatedAt = Date.now()) {
+  const value: XaiCredentialValue = xaiCredentialValue(tokens);
+  await database.providerCredentials.put({ providerId, kind: 'xaiSubOAuth', value, updatedAt });
+}
+
+export async function saveRefreshedXaiCredential(
+  providerId: number,
+  previous: ProviderCredential,
+  tokens: XaiAuthTokens,
+  updatedAt = Date.now(),
+) {
+  return database.transaction('rw', database.providers, database.providerCredentials, async () => {
+    const provider = await requireProvider(providerId);
+    if (provider.kind !== 'xaiSub') throw new Error(`Provider is not xAI subscription: ${providerId}`);
+    const current = await database.providerCredentials.get(providerId);
+    if (!isSameXaiCredential(current, previous)) throw new Error('xAI subscription is not signed in.');
+    await database.providerCredentials.put({ providerId, kind: 'xaiSubOAuth', value: xaiCredentialValue(tokens), updatedAt });
   });
 }
 
@@ -250,11 +282,12 @@ async function addProviderModels(providerId: number, inputs: ProviderConnectionM
   return models;
 }
 
-async function addProviderModel(providerId: number, input: { name: string; contextWindowTokens?: number }) {
+async function addProviderModel(providerId: number, input: ProviderConnectionModelInput) {
   const id = Number(await database.models.add({
     providerId,
     name: input.name.trim(),
     contextWindowTokens: normalizeContextWindowTokens(input.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS),
+    ...modelMetadataPatch(input),
   } as Model));
   return requireModel(id);
 }
@@ -306,9 +339,11 @@ function codexModelPatch(providerId: number, model: CodexDiscoveredModel, metada
     providerId,
     name: model.name.trim(),
     contextWindowTokens: current?.contextWindowTokens ?? normalizeContextWindowTokens(model.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS),
-    ...(model.displayName ? { displayName: model.displayName } : {}),
-    ...(model.supportedReasoningEfforts ? { supportedReasoningEfforts: model.supportedReasoningEfforts } : {}),
-    ...(model.defaultReasoningEffort ? { defaultReasoningEffort: model.defaultReasoningEffort } : {}),
+    ...modelMetadataPatch({
+      displayName: model.displayName,
+      supportedReasoningEfforts: model.supportedReasoningEfforts ?? [],
+      defaultReasoningEffort: model.defaultReasoningEffort,
+    }),
     ...(model.priority !== undefined ? { priority: model.priority } : {}),
     ...(model.visibility ? { visibility: model.visibility } : {}),
     ...(model.supportedInApi !== undefined ? { supportedInApi: model.supportedInApi } : {}),
@@ -399,19 +434,42 @@ function providerUpdatePatch(input: UpdateProviderConnectionInput): Partial<Prov
     updatedAt: Date.now(),
     ...(input.name !== undefined ? { name: input.name.trim() } : {}),
     ...(input.baseURL !== undefined ? { baseURL: input.baseURL.trim() } : {}),
-    ...(input.kind !== undefined ? { kind: input.kind } : {}),
+    ...(input.kind !== undefined ? { kind: input.kind } : input.baseURL !== undefined ? { kind: apiKeyProviderKind(input.baseURL) } : {}),
   };
 }
 
-function modelUpdatePatch(patch: { name?: string; contextWindowTokens?: number }) {
+function modelUpdatePatch(patch: ProviderConnectionModelInput | { name?: string; contextWindowTokens?: number }) {
   return {
     ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
     ...(patch.contextWindowTokens !== undefined ? { contextWindowTokens: normalizeContextWindowTokensStrict(patch.contextWindowTokens) } : {}),
+    ...modelMetadataPatch(patch as Partial<ProviderConnectionModelInput>),
+  };
+}
+
+function modelMetadataPatch(input: {
+  displayName?: string;
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
+}) {
+  const supportedReasoningEfforts = normalizeSupportedReasoningEfforts(input.supportedReasoningEfforts);
+  const defaultReasoningEffort = readReasoningEffortLevel(input.defaultReasoningEffort);
+  return {
+    ...(Object.hasOwn(input, 'displayName') ? { displayName: input.displayName } : {}),
+    ...(Object.hasOwn(input, 'supportedReasoningEfforts') ? { supportedReasoningEfforts } : {}),
+    ...(Object.hasOwn(input, 'defaultReasoningEffort') ? { defaultReasoningEffort } : {}),
   };
 }
 
 function validateProvider(input: { name: string; baseURL: string; apiKey: string; kind?: ProviderKind }) {
-  if (input.kind !== undefined && input.kind !== 'openaiCompatible' && input.kind !== 'openaiCodex') throw new Error('Provider kind is invalid.');
+  if (
+    input.kind !== undefined &&
+    input.kind !== 'openaiCompatible' &&
+    input.kind !== 'openaiApiKey' &&
+    input.kind !== 'openaiCodex' &&
+    input.kind !== 'xaiSub'
+  ) {
+    throw new Error('Provider kind is invalid.');
+  }
   if (!input.name.trim()) throw new Error('Provider name is required.');
   if (!input.baseURL.trim()) throw new Error('Provider baseURL is required.');
   try {
@@ -434,7 +492,111 @@ function validateModel(input: { providerId: number; name: string; contextWindowT
 }
 
 function validateCredentialKind(kind: ProviderCredentialKind) {
-  if (kind !== 'apiKey' && kind !== 'openaiCodexOAuth') throw new Error('Provider credential kind is invalid.');
+  if (kind !== 'apiKey' && kind !== 'openaiCodexOAuth' && kind !== 'xaiSubOAuth') {
+    throw new Error('Provider credential kind is invalid.');
+  }
+}
+
+async function upsertXaiProvider(now: number): Promise<Provider> {
+  const existing = await database.providers.where('kind').equals('xaiSub').first();
+  if (existing) {
+    await database.providers.update(existing.id, {
+      name: XAI_SUB_PROVIDER_NAME,
+      baseURL: XAI_SUB_PROVIDER_BASE_URL,
+      updatedAt: now,
+    });
+    return requireProvider(existing.id);
+  }
+  const providerId = Number(await database.providers.add({
+    kind: 'xaiSub',
+    name: XAI_SUB_PROVIDER_NAME,
+    baseURL: XAI_SUB_PROVIDER_BASE_URL,
+    createdAt: now,
+    updatedAt: now,
+  } as Provider));
+  return requireProvider(providerId);
+}
+
+async function saveXaiModelRecords(providerId: number, fetchedAt: number) {
+  const existing = await database.models.where('providerId').equals(providerId).toArray();
+  const existingByName = new Map(existing.map((model) => [model.name, model]));
+  const seen = new Set<string>();
+  const saved: Model[] = [];
+
+  for (const model of XAI_MODELS) {
+    seen.add(model.name);
+    const current = existingByName.get(model.name);
+    const patch: Partial<Model> = {
+      providerId,
+      name: model.name,
+      contextWindowTokens: current?.contextWindowTokens ?? model.contextWindowTokens,
+      displayName: model.displayName,
+      supportedReasoningEfforts: model.supportedReasoningEfforts,
+      defaultReasoningEffort: model.defaultReasoningEffort,
+      metadataFetchedAt: fetchedAt,
+      unavailable: false,
+    };
+    if (current) {
+      await database.models.update(current.id, patch);
+      saved.push(await requireModel(current.id));
+    } else {
+      const id = Number(await database.models.add(patch as Model));
+      saved.push(await requireModel(id));
+    }
+  }
+
+  const missingIds = existing.filter((model) => !seen.has(model.name) && !model.unavailable).map((model) => model.id);
+  if (missingIds.length > 0) {
+    await database.models.bulkUpdate(missingIds.map((key) => ({ key, changes: { unavailable: true, metadataFetchedAt: fetchedAt } })));
+  }
+  return saved;
+}
+
+async function selectXaiDefaultIfNeeded(saved: Model[]) {
+  const current = await readSelectedModelId();
+  const credentialedProviderIds = await readCredentialedProviderIds();
+  if (current !== null) {
+    const selected = await database.models.get(current);
+    if (selected && isSelectableModel(selected, credentialedProviderIds)) return current;
+  }
+  const fallback = saved.find((model) => isSelectableModel(model, credentialedProviderIds));
+  if (!fallback) return reconcileSelectedModel();
+  await writeSelectedModel(fallback.id);
+  return fallback.id;
+}
+
+function xaiCredentialValue(tokens: XaiAuthTokens): XaiCredentialValue {
+  return {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    ...(tokens.idToken ? { idToken: tokens.idToken } : {}),
+    expiresAt: tokens.expiresAt,
+    ...(tokens.email ? { email: tokens.email } : {}),
+    ...(tokens.name ? { name: tokens.name } : {}),
+  };
+}
+
+function isSameXaiCredential(current: ProviderCredential | undefined, previous: ProviderCredential) {
+  if (current?.kind !== 'xaiSubOAuth' || previous.kind !== 'xaiSubOAuth') return false;
+  if (current.updatedAt !== previous.updatedAt) return false;
+  const currentValue = readXaiCredentialIdentity(current.value);
+  const previousValue = readXaiCredentialIdentity(previous.value);
+  return Boolean(
+    currentValue &&
+      previousValue &&
+      currentValue.accessToken === previousValue.accessToken &&
+      currentValue.refreshToken === previousValue.refreshToken,
+  );
+}
+
+function readXaiCredentialIdentity(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined;
+  const credential = value as Partial<XaiCredentialValue>;
+  if (!credential.accessToken || !credential.refreshToken) return undefined;
+  return {
+    accessToken: credential.accessToken,
+    refreshToken: credential.refreshToken,
+  };
 }
 
 export function assertProviderCredentialKind(credential: ProviderCredential) {

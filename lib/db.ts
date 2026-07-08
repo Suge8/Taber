@@ -4,7 +4,7 @@ export const DEFAULT_SESSION_LIMIT = 30;
 export const UNLIMITED_SESSION_RETENTION = 'unlimited';
 export const sessionRetentionLimitKey = 'sessionRetentionLimit';
 
-export type ProviderKind = 'openaiCompatible' | 'openaiCodex';
+export type ProviderKind = 'openaiCompatible' | 'openaiApiKey' | 'openaiCodex' | 'xaiSub';
 
 export type Provider = {
   id: number;
@@ -15,7 +15,7 @@ export type Provider = {
   updatedAt: number;
 };
 
-export type ProviderCredentialKind = 'apiKey' | 'openaiCodexOAuth';
+export type ProviderCredentialKind = 'apiKey' | 'openaiCodexOAuth' | 'xaiSubOAuth';
 
 export type ProviderCredential = {
   providerId: number;
@@ -90,18 +90,7 @@ export class TaberDatabase extends Dexie {
 
   constructor() {
     super('taber');
-    this.version(2).stores({
-      providers: '++id, name',
-      models: '++id, providerId, name',
-      sessions: '++id, updatedAt, pinned',
-      toolRuns: '++id, sessionId, createdAt, toolName',
-      agentEvents: '++id, sessionId, createdAt, type',
-      settings: '&key',
-    }).upgrade((transaction) => transaction.table('models').toCollection().modify((model) => {
-      if (!Number.isInteger(model.contextWindowTokens) || Number(model.contextWindowTokens) <= 0) model.contextWindowTokens = 128000;
-    }));
-
-    this.version(3).stores({
+    this.version(1).stores({
       providers: '++id, kind, name',
       providerCredentials: '&providerId, kind',
       models: '++id, providerId, name',
@@ -109,30 +98,6 @@ export class TaberDatabase extends Dexie {
       toolRuns: '++id, sessionId, createdAt, toolName',
       agentEvents: '++id, sessionId, createdAt, type',
       settings: '&key',
-    }).upgrade(async (transaction) => {
-      const credentials: ProviderCredential[] = [];
-      const now = Date.now();
-      await transaction.table('providers').toCollection().modify((provider) => {
-        const apiKey = typeof provider.apiKey === 'string' ? provider.apiKey : '';
-        if (apiKey) credentials.push({ providerId: Number(provider.id), kind: 'apiKey', value: { apiKey }, updatedAt: now });
-        provider.kind = 'openaiCompatible';
-        provider.createdAt = Number.isFinite(provider.createdAt) ? provider.createdAt : now;
-        provider.updatedAt = Number.isFinite(provider.updatedAt) ? provider.updatedAt : now;
-        delete provider.apiKey;
-      });
-      if (credentials.length > 0) await transaction.table('providerCredentials').bulkPut(credentials);
-    });
-
-    this.version(4).stores({
-      providers: '++id, kind, name',
-      providerCredentials: '&providerId, kind',
-      models: '++id, providerId, name',
-      sessions: '++id, updatedAt, pinned',
-      toolRuns: '++id, sessionId, createdAt, toolName',
-      agentEvents: '++id, sessionId, createdAt, type',
-      settings: '&key',
-    }).upgrade(async (transaction) => {
-      await Promise.all(['providers', 'providerCredentials', 'models', 'sessions', 'toolRuns', 'agentEvents', 'settings'].map((table) => transaction.table(table).clear()));
     });
   }
 }

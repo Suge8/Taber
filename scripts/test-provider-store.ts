@@ -1,16 +1,10 @@
 import assert from 'node:assert/strict';
 import 'fake-indexeddb/auto';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 const { database, initializeDatabase } = await import('../lib/db.ts');
 const {
-  saveProvider,
-  updateProvider,
-  deleteProvider,
   getProviderApiKey,
-  saveModel,
-  updateModel,
-  deleteModel,
-  setSelectedModelId,
   getSelectedModelId,
   listProvidersWithModels,
   testConnection,
@@ -18,32 +12,32 @@ const {
   getReasoningEffort,
   normalizeReasoningEffort,
   reasoningProviderOptions,
+  reasoningProviderOptionsForModel,
   setReasoningEffort,
 } = await import('../lib/provider-store.ts');
 const {
   createProviderConnection,
   updateProviderConnection,
   deleteProviderConnection,
-  deleteProviderModel,
   saveOpenAICodexModels,
   selectModel,
 } = await import('../lib/provider-config-flow.ts');
 
 await initializeDatabase();
 
-await testSaveProviderAndModel();
-await testCreateProviderConnectionIsAtomic();
+await testCreateOpenAIProviderConnectionUsesOfficialKind();
+await testCreateCompatibleProviderConnectionIsAtomic();
 await testUpdateProviderConnectionIsAtomic();
 await testDeleteProviderConnectionCascades();
-await testDeleteProviderModelFallsBack();
+await testRemovingSelectedModelFallsBack();
 await testCodexModelRefreshFallbackAndManualContext();
 await testUpdateModelContextWindow();
-await testDeleteProviderCascadesAndClearsSelected();
 await testDeleteProviderFallsBackToNextModel();
-await testDeleteSelectedModelFallsBack();
 await testUpdateProviderValidates();
 await testMaskApiKey();
 await testReasoningEffortSettings();
+await testReasoningProviderOptionsForModel();
+await testOpenAICompatibleRequestOmitsUnsupportedReasoning();
 await testConnectionUsesBearerAndModelsEndpoint();
 await testConnectionFailsOnHttpError();
 
@@ -59,33 +53,35 @@ async function reset() {
   });
 }
 
-async function testSaveProviderAndModel() {
-  await reset();
-  const provider = await saveProvider({ name: 'OpenAI', baseURL: 'https://api.openai.com/v1', apiKey: 'sk-test1234' });
-  assert.equal(provider.kind, 'openaiCompatible');
-  assert.equal(Object.hasOwn(provider, 'apiKey'), false);
-  assert.equal(await getProviderApiKey(provider.id), 'sk-test1234');
-  const model = await saveModel({ providerId: provider.id, name: 'gpt-4o-mini' });
-  await setSelectedModelId(model.id);
-  const view = await listProvidersWithModels();
-  assert.equal(view.length, 1);
-  assert.equal(view[0]!.hasCredential, true);
-  assert.equal(Object.hasOwn(view[0]!, 'apiKey'), false);
-  assert.equal(view[0]!.models.length, 1);
-  assert.equal(view[0]!.models[0]!.name, 'gpt-4o-mini');
-  assert.equal(view[0]!.models[0]!.contextWindowTokens, 128000);
-  assert.equal(await getSelectedModelId(), model.id);
-}
-
-async function testCreateProviderConnectionIsAtomic() {
+async function testCreateOpenAIProviderConnectionUsesOfficialKind() {
   await reset();
   const created = await createProviderConnection({
     name: 'OpenAI',
     baseURL: 'https://api.openai.com/v1',
+    apiKey: 'sk-test1234',
+    models: [{ name: 'gpt-5.4', contextWindowTokens: 200000, supportedReasoningEfforts: ['low', 'high'] }],
+  });
+  assert.equal(created.provider.kind, 'openaiApiKey');
+  assert.equal(await getProviderApiKey(created.provider.id), 'sk-test1234');
+  assert.equal(await getSelectedModelId(), created.models[0]!.id);
+
+  const view = await listProvidersWithModels();
+  assert.equal(view.length, 1);
+  assert.equal(view[0]!.hasCredential, true);
+  assert.equal(Object.hasOwn(view[0]!, 'apiKey'), false);
+  assert.equal(view[0]!.models[0]!.name, 'gpt-5.4');
+  assert.deepEqual(view[0]!.models[0]!.supportedReasoningEfforts, ['low', 'high']);
+}
+
+async function testCreateCompatibleProviderConnectionIsAtomic() {
+  await reset();
+  const created = await createProviderConnection({
+    name: 'Compatible',
+    baseURL: 'https://api.example.com/v1',
     apiKey: 'sk-test',
     models: [
-      { name: 'gpt-a', contextWindowTokens: 200000 },
-      { name: 'gpt-b' },
+      { name: 'model-a', contextWindowTokens: 200000 },
+      { name: 'model-b' },
     ],
   });
   assert.equal(created.provider.kind, 'openaiCompatible');
@@ -125,6 +121,7 @@ async function testUpdateProviderConnectionIsAtomic() {
 
   assert.equal(updated.provider.name, 'Renamed');
   assert.equal(updated.provider.baseURL, 'https://new.example');
+  assert.equal(updated.provider.kind, 'openaiCompatible');
   assert.equal(await getProviderApiKey(created.provider.id), 'new-key');
   assert.deepEqual(updated.models.map((model) => model.name), ['kept', 'new']);
   assert.equal(updated.models.find((model) => model.name === 'kept')?.contextWindowTokens, 64000);
@@ -145,12 +142,16 @@ async function testDeleteProviderConnectionCascades() {
   assert.equal(await getSelectedModelId(), second.models[0]!.id);
 }
 
-async function testDeleteProviderModelFallsBack() {
+async function testRemovingSelectedModelFallsBack() {
   await reset();
   const created = await createProviderConnection({ name: 'P', baseURL: 'https://example.com', apiKey: 'k', models: [{ name: 'm1' }, { name: 'm2' }] });
   await selectModel(created.models[0]!.id);
-  const result = await deleteProviderModel(created.models[0]!.id);
-  assert.equal(result.nextSelectedModelId, created.models[1]!.id);
+  const result = await updateProviderConnection(created.provider.id, {
+    name: created.provider.name,
+    baseURL: created.provider.baseURL,
+    models: [{ id: created.models[1]!.id, name: 'm2' }],
+  });
+  assert.deepEqual(result.removedModelIds, [created.models[0]!.id]);
   assert.equal(await getSelectedModelId(), created.models[1]!.id);
 }
 
@@ -185,58 +186,39 @@ async function testCodexModelRefreshFallbackAndManualContext() {
 
 async function testUpdateModelContextWindow() {
   await reset();
-  const provider = await saveProvider({ name: 'P', baseURL: 'https://example.com', apiKey: 'k' });
-  const model = await saveModel({ providerId: provider.id, name: 'm', contextWindowTokens: 200000 });
-  assert.equal(model.contextWindowTokens, 200000);
-  const updated = await updateModel(model.id, { contextWindowTokens: 64000 });
-  assert.equal(updated.contextWindowTokens, 64000);
-  await assert.rejects(() => updateModel(model.id, { contextWindowTokens: 0 }), /positive integer/);
-}
-
-async function testDeleteProviderCascadesAndClearsSelected() {
-  await reset();
-  const provider = await saveProvider({ name: 'P', baseURL: 'https://example.com', apiKey: 'k' });
-  const model = await saveModel({ providerId: provider.id, name: 'm' });
-  await setSelectedModelId(model.id);
-  const result = await deleteProvider(provider.id);
-  assert.deepEqual(result.removedModelIds, [model.id]);
-  assert.equal(result.nextSelectedModelId, null);
-  assert.equal(await getSelectedModelId(), null);
-  assert.equal((await database.models.toArray()).length, 0);
-  assert.equal(await database.providerCredentials.get(provider.id), undefined);
+  const created = await createProviderConnection({ name: 'P', baseURL: 'https://example.com', apiKey: 'k', models: [{ name: 'm', contextWindowTokens: 200000 }] });
+  assert.equal(created.models[0]!.contextWindowTokens, 200000);
+  const updated = await updateProviderConnection(created.provider.id, {
+    name: created.provider.name,
+    baseURL: created.provider.baseURL,
+    models: [{ id: created.models[0]!.id, name: 'm', contextWindowTokens: 64000 }],
+  });
+  assert.equal(updated.models[0]!.contextWindowTokens, 64000);
+  await assert.rejects(() => updateProviderConnection(created.provider.id, {
+    name: created.provider.name,
+    baseURL: created.provider.baseURL,
+    models: [{ id: created.models[0]!.id, name: 'm', contextWindowTokens: 0 }],
+  }), /positive integer/);
 }
 
 async function testDeleteProviderFallsBackToNextModel() {
   await reset();
-  const a = await saveProvider({ name: 'A', baseURL: 'https://a.example', apiKey: 'k' });
-  const b = await saveProvider({ name: 'B', baseURL: 'https://b.example', apiKey: 'k' });
-  const ma = await saveModel({ providerId: a.id, name: 'm-a' });
-  const mb = await saveModel({ providerId: b.id, name: 'm-b' });
-  await setSelectedModelId(ma.id);
-  const result = await deleteProvider(a.id);
-  assert.equal(result.nextSelectedModelId, mb.id);
-  assert.equal(await getSelectedModelId(), mb.id);
-}
-
-async function testDeleteSelectedModelFallsBack() {
-  await reset();
-  const provider = await saveProvider({ name: 'P', baseURL: 'https://example.com', apiKey: 'k' });
-  const m1 = await saveModel({ providerId: provider.id, name: 'm1' });
-  const m2 = await saveModel({ providerId: provider.id, name: 'm2' });
-  await setSelectedModelId(m1.id);
-  const result = await deleteModel(m1.id);
-  assert.equal(result.nextSelectedModelId, m2.id);
+  const first = await createProviderConnection({ name: 'A', baseURL: 'https://a.example', apiKey: 'k', models: [{ name: 'm-a' }] });
+  const second = await createProviderConnection({ name: 'B', baseURL: 'https://b.example', apiKey: 'k', models: [{ name: 'm-b' }] });
+  await selectModel(first.models[0]!.id);
+  const result = await deleteProviderConnection(first.provider.id);
+  assert.equal(result.nextSelectedModelId, second.models[0]!.id);
+  assert.equal(await getSelectedModelId(), second.models[0]!.id);
 }
 
 async function testUpdateProviderValidates() {
   await reset();
-  const provider = await saveProvider({ name: 'P', baseURL: 'https://example.com', apiKey: 'k' });
-  await assert.rejects(() => updateProvider(provider.id, { baseURL: 'not a url' }), /valid URL/);
-  await updateProvider(provider.id, { name: 'Renamed', apiKey: 'new-key' });
-  const reread = await database.providers.get(provider.id);
-  assert.equal(reread?.name, 'Renamed');
-  assert.equal(Object.hasOwn(reread!, 'apiKey'), false);
-  assert.equal(await getProviderApiKey(provider.id), 'new-key');
+  const created = await createProviderConnection({ name: 'P', baseURL: 'https://example.com', apiKey: 'k', models: [{ name: 'm' }] });
+  await assert.rejects(() => updateProviderConnection(created.provider.id, { baseURL: 'not a url', models: [{ id: created.models[0]!.id, name: 'm' }] }), /valid URL/);
+  const updated = await updateProviderConnection(created.provider.id, { name: 'Renamed', apiKey: 'new-key', models: [{ id: created.models[0]!.id, name: 'm' }] });
+  assert.equal(updated.provider.name, 'Renamed');
+  assert.equal(Object.hasOwn(updated.provider, 'apiKey'), false);
+  assert.equal(await getProviderApiKey(created.provider.id), 'new-key');
 }
 
 function testMaskApiKey() {
@@ -247,13 +229,44 @@ function testMaskApiKey() {
 async function testReasoningEffortSettings() {
   await reset();
   assert.equal(await getReasoningEffort(), 'default');
-  assert.equal(normalizeReasoningEffort('none'), 'default');
+  assert.equal(normalizeReasoningEffort('unknown'), 'default');
+  assert.equal(normalizeReasoningEffort('none'), 'none');
+  assert.equal(normalizeReasoningEffort('minimal'), 'minimal');
+  assert.equal(normalizeReasoningEffort('xhigh'), 'xhigh');
   assert.equal(reasoningProviderOptions('default'), undefined);
+  assert.deepEqual(reasoningProviderOptions('none'), { openaiCompatible: { reasoningEffort: 'none' } });
   assert.deepEqual(reasoningProviderOptions('low'), { openaiCompatible: { reasoningEffort: 'low' } });
   assert.deepEqual(reasoningProviderOptions('medium'), { openaiCompatible: { reasoningEffort: 'medium' } });
   assert.deepEqual(reasoningProviderOptions('high'), { openaiCompatible: { reasoningEffort: 'high' } });
+  assert.deepEqual(reasoningProviderOptions('xhigh'), { openaiCompatible: { reasoningEffort: 'xhigh' } });
   await setReasoningEffort('high');
   assert.equal(await getReasoningEffort(), 'high');
+}
+
+function testReasoningProviderOptionsForModel() {
+  assert.throws(() => reasoningProviderOptionsForModel('low', undefined), /does not support reasoning effort/);
+  assert.throws(() => reasoningProviderOptionsForModel('low', []), /none reported/);
+  assert.equal(reasoningProviderOptionsForModel('default', ['low']), undefined);
+  assert.deepEqual(reasoningProviderOptionsForModel('low', ['low', 'high']), { openaiCompatible: { reasoningEffort: 'low' } });
+}
+
+async function testOpenAICompatibleRequestOmitsUnsupportedReasoning() {
+  let body: Record<string, unknown> = {};
+  const model = createOpenAICompatible({
+    name: 'DeepSeek',
+    baseURL: 'https://api.deepseek.com',
+    apiKey: 'sk-test',
+    fetch: async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ id: 'chatcmpl-test', object: 'chat.completion', created: 0, model: 'deepseek-v4-pro', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  })('deepseek-v4-pro') as any;
+
+  await model.doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hi' }] }], providerOptions: reasoningProviderOptionsForModel('default', undefined) });
+  assert.equal(Object.hasOwn(body, 'reasoning_effort'), false);
+
+  await model.doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hi' }] }], providerOptions: reasoningProviderOptionsForModel('low', ['low']) });
+  assert.equal(body.reasoning_effort, 'low');
 }
 
 async function testConnectionUsesBearerAndModelsEndpoint() {

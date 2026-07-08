@@ -1,3 +1,5 @@
+import { readReasoningEffortLevel, type ReasoningEffortLevel } from './reasoning-effort.ts';
+
 export const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 export const CODEX_ISSUER = 'https://auth.openai.com';
 export const CODEX_DEVICE_VERIFY_URL = `${CODEX_ISSUER}/codex/device`;
@@ -43,8 +45,8 @@ export type CodexDiscoveredModel = {
   name: string;
   displayName?: string;
   contextWindowTokens?: number;
-  supportedReasoningEfforts?: string[];
-  defaultReasoningEffort?: string;
+  supportedReasoningEfforts?: ReasoningEffortLevel[];
+  defaultReasoningEffort?: ReasoningEffortLevel;
   priority?: number;
   visibility?: string;
   supportedInApi?: boolean;
@@ -368,12 +370,12 @@ function readReasoningEfforts(value: unknown) {
   if (!Array.isArray(value)) return [];
   const efforts = value
     .map((item) => readReasoningEffort(item) ?? readReasoningEffort(readRecord(item)?.effort))
-    .filter((effort): effort is string => Boolean(effort));
+    .filter((effort): effort is ReasoningEffortLevel => Boolean(effort));
   return [...new Set(efforts)];
 }
 
 function readReasoningEffort(value: unknown) {
-  return readString(value)?.toLowerCase();
+  return readReasoningEffortLevel(value);
 }
 
 function joinUrl(base: string, path: string) {

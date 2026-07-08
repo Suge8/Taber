@@ -16,7 +16,6 @@ const {
 await testSnapshotPersistsRecords();
 await testPruneDeletesOldSessionsAndLinkedRecords();
 await testUnlimitedRetentionDisablesPrune();
-await testVersion4MigrationClearsLocalData();
 
 database.close();
 console.info('database integration tests passed');
@@ -83,60 +82,6 @@ async function testUnlimitedRetentionDisablesPrune() {
   }
 
   assert.equal(await database.sessions.count(), 35);
-}
-
-async function testVersion4MigrationClearsLocalData() {
-  database.close();
-  await database.delete();
-  await createVersion3DatabaseWithData();
-  await initializeDatabase();
-
-  assert.equal(await database.providers.count(), 0);
-  assert.equal(await database.providerCredentials.count(), 0);
-  assert.equal(await database.models.count(), 0);
-  assert.equal(await database.sessions.count(), 0);
-  assert.equal(await database.toolRuns.count(), 0);
-  assert.equal(await database.agentEvents.count(), 0);
-  assert.equal(await database.settings.count(), 0);
-}
-
-async function createVersion3DatabaseWithData() {
-  const request = indexedDB.open('taber', 30);
-  await new Promise<void>((resolve, reject) => {
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      const providers = db.createObjectStore('providers', { keyPath: 'id', autoIncrement: true });
-      providers.createIndex('kind', 'kind');
-      providers.createIndex('name', 'name');
-      const providerCredentials = db.createObjectStore('providerCredentials', { keyPath: 'providerId' });
-      providerCredentials.createIndex('kind', 'kind');
-      const models = db.createObjectStore('models', { keyPath: 'id', autoIncrement: true });
-      models.createIndex('providerId', 'providerId');
-      models.createIndex('name', 'name');
-      const sessions = db.createObjectStore('sessions', { keyPath: 'id', autoIncrement: true });
-      sessions.createIndex('updatedAt', 'updatedAt');
-      sessions.createIndex('pinned', 'pinned');
-      const toolRuns = db.createObjectStore('toolRuns', { keyPath: 'id', autoIncrement: true });
-      toolRuns.createIndex('sessionId', 'sessionId');
-      toolRuns.createIndex('createdAt', 'createdAt');
-      toolRuns.createIndex('toolName', 'toolName');
-      const agentEvents = db.createObjectStore('agentEvents', { keyPath: 'id', autoIncrement: true });
-      agentEvents.createIndex('sessionId', 'sessionId');
-      agentEvents.createIndex('createdAt', 'createdAt');
-      agentEvents.createIndex('type', 'type');
-      db.createObjectStore('settings', { keyPath: 'key' });
-
-      providers.put({ id: 1, kind: 'openaiCompatible', name: 'Old', baseURL: 'https://old.example', createdAt: 1, updatedAt: 1 });
-      providerCredentials.put({ providerId: 1, kind: 'apiKey', value: { apiKey: 'old-key' }, updatedAt: 1 });
-      models.put({ id: 1, providerId: 1, name: 'old-model', contextWindowTokens: 128000 });
-      sessions.put({ id: 1, title: 'Old session', pinned: false, createdAt: 1, updatedAt: 1 });
-      toolRuns.put({ id: 1, sessionId: 1, toolName: 'getDocument', input: {}, createdAt: 1 });
-      agentEvents.put({ id: 1, sessionId: 1, type: 'task.started', payload: {}, createdAt: 1 });
-      request.transaction?.objectStore('settings').put({ key: 'browserAccessOnboardingSeen', value: true });
-    };
-    request.onsuccess = () => { request.result.close(); resolve(); };
-    request.onerror = () => reject(request.error);
-  });
 }
 
 async function resetDatabase() {

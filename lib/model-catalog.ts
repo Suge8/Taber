@@ -1,4 +1,5 @@
 import { database } from './db.ts';
+import { normalizeSupportedReasoningEfforts, readReasoningEffortLevel, type ReasoningEffortLevel } from './reasoning-effort.ts';
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128000;
 export const modelCatalogSettingKey = 'modelCatalog';
@@ -6,6 +7,9 @@ export const modelCatalogSettingKey = 'modelCatalog';
 export type ModelPreset = {
   name: string;
   contextWindowTokens: number;
+  displayName?: string;
+  supportedReasoningEfforts?: ReasoningEffortLevel[];
+  defaultReasoningEffort?: ReasoningEffortLevel;
 };
 
 export type ProviderPreset = {
@@ -186,9 +190,29 @@ function readModels(value: unknown) {
     const model = rawModel as Record<string, unknown>;
     const limit = model.limit && typeof model.limit === 'object' ? model.limit as Record<string, unknown> : undefined;
     const contextWindowTokens = normalizeContextWindowTokens(limit?.context ?? model.contextWindowTokens ?? model.context_window);
-    models.push({ name, contextWindowTokens });
+    const supportedReasoningEfforts = readReasoningOptions(model.reasoning_options);
+    const defaultReasoningEffort = readReasoningEffortLevel(model.default_reasoning_effort ?? model.default_reasoning_level);
+    models.push({
+      name,
+      contextWindowTokens,
+      ...(readString(model.name) && readString(model.name) !== name ? { displayName: readString(model.name) } : {}),
+      ...(supportedReasoningEfforts.length > 0 ? { supportedReasoningEfforts } : {}),
+      ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+    });
   }
   return models;
+}
+
+function readReasoningOptions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const efforts = value.flatMap((item) => {
+    if (typeof item === 'string') return [item];
+    if (!item || typeof item !== 'object') return [];
+    const option = item as Record<string, unknown>;
+    if (readString(option.type) !== 'effort') return [];
+    return Array.isArray(option.values) ? option.values : [];
+  });
+  return normalizeSupportedReasoningEfforts(efforts);
 }
 
 function parseCachedCatalog(value: unknown): CachedModelCatalog | null {

@@ -1,18 +1,17 @@
-import { database, type Model, type Provider, type ProviderCredential, type ProviderKind } from './db.ts';
+import { database, type Model, type Provider, type ProviderCredential } from './db.ts';
 import {
   SELECTED_MODEL_KEY,
   assertProviderCredentialKind,
-  deleteProviderConnection,
-  deleteProviderModel,
   removeProviderCredential,
-  saveProviderModel,
   selectModel,
-  updateProviderModel,
 } from './provider-config-flow.ts';
-
-export type ProviderInput = { name: string; baseURL: string; apiKey: string; kind?: ProviderKind };
-export type ModelInput = { providerId: number; name: string; contextWindowTokens?: number };
-export type ModelPatch = { name?: string; contextWindowTokens?: number };
+import {
+  assertReasoningEffortSupported,
+  normalizeReasoningEffort,
+  normalizeReasoningEffortForModel,
+  reasoningEffortOptionsForModel,
+  type ReasoningEffort,
+} from './reasoning-effort.ts';
 
 export type ProviderWithModels = Provider & { models: Model[]; hasCredential: boolean };
 
@@ -20,7 +19,7 @@ export type ConnectionTestResult =
   | { ok: true; modelIds?: string[] }
   | { ok: false; error: string };
 
-export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high';
+export { normalizeReasoningEffort, normalizeReasoningEffortForModel, reasoningEffortOptionsForModel, type ReasoningEffort };
 
 const REASONING_EFFORT_KEY = 'reasoningEffort';
 
@@ -45,47 +44,6 @@ export async function listProvidersWithModels(): Promise<ProviderWithModels[]> {
   }));
 }
 
-export async function saveProvider(input: ProviderInput): Promise<Provider> {
-  validateProvider(input);
-  const now = Date.now();
-  const provider = await database.transaction('rw', database.providers, database.providerCredentials, async () => {
-    const id = await database.providers.add({
-      kind: input.kind ?? 'openaiCompatible',
-      name: input.name.trim(),
-      baseURL: input.baseURL.trim(),
-      createdAt: now,
-      updatedAt: now,
-    } as Provider);
-    await saveApiKeyCredential(Number(id), input.apiKey, now);
-    const created = await database.providers.get(Number(id));
-    if (!created) throw new Error('Failed to read newly created provider');
-    return created;
-  });
-  return provider;
-}
-
-export async function updateProvider(id: number, patch: Partial<ProviderInput>): Promise<Provider> {
-  const existing = await database.providers.get(id);
-  if (!existing) throw new Error(`Provider not found: ${id}`);
-  const next: Partial<Provider> = { updatedAt: Date.now() };
-  if (patch.name !== undefined) next.name = patch.name.trim();
-  if (patch.baseURL !== undefined) next.baseURL = patch.baseURL.trim();
-  if (patch.kind !== undefined) next.kind = patch.kind;
-  validateProvider({ ...existing, ...next, apiKey: '' });
-
-  return database.transaction('rw', database.providers, database.providerCredentials, async () => {
-    await database.providers.update(id, next);
-    if (patch.apiKey !== undefined) await saveApiKeyCredential(id, patch.apiKey, next.updatedAt!);
-    const updated = await database.providers.get(id);
-    if (!updated) throw new Error(`Provider not found after update: ${id}`);
-    return updated;
-  });
-}
-
-export async function deleteProvider(id: number): Promise<{ removedModelIds: number[]; nextSelectedModelId: number | null }> {
-  return deleteProviderConnection(id);
-}
-
 export async function readProviderCredential(providerId: number): Promise<ProviderCredential | undefined> {
   return database.providerCredentials.get(providerId);
 }
@@ -102,18 +60,6 @@ export async function deleteProviderCredential(providerId: number): Promise<void
 export async function getProviderApiKey(providerId: number): Promise<string> {
   const credential = await readProviderCredential(providerId);
   return credential?.kind === 'apiKey' ? readApiKeyCredential(credential.value) : '';
-}
-
-export async function saveModel(input: ModelInput): Promise<Model> {
-  return saveProviderModel(input);
-}
-
-export async function updateModel(id: number, patch: ModelPatch): Promise<Model> {
-  return updateProviderModel(id, patch);
-}
-
-export async function deleteModel(id: number): Promise<{ nextSelectedModelId: number | null }> {
-  return deleteProviderModel(id);
 }
 
 export async function getSelectedModelId(): Promise<number | null> {
@@ -139,12 +85,13 @@ export async function setReasoningEffort(value: ReasoningEffort): Promise<void> 
   await database.settings.put({ key: REASONING_EFFORT_KEY, value: normalizeReasoningEffort(value) });
 }
 
-export function normalizeReasoningEffort(value: unknown): ReasoningEffort {
-  return value === 'low' || value === 'medium' || value === 'high' ? value : 'default';
-}
-
 export function reasoningProviderOptions(value: ReasoningEffort) {
   return value === 'default' ? undefined : { openaiCompatible: { reasoningEffort: value } };
+}
+
+export function reasoningProviderOptionsForModel(value: ReasoningEffort, supported: unknown, modelId = 'selected model') {
+  assertReasoningEffortSupported(value, supported, modelId);
+  return reasoningProviderOptions(value);
 }
 
 export async function testConnection(
@@ -171,22 +118,6 @@ export async function testConnection(
     return { ok: true, modelIds: ids };
   } catch (error) {
     return { ok: false, error: describe(error) };
-  }
-}
-
-async function saveApiKeyCredential(providerId: number, apiKey: string, updatedAt: number) {
-  await database.providerCredentials.put({ providerId, kind: 'apiKey', value: { apiKey }, updatedAt });
-}
-
-function validateProvider(input: { name: string; baseURL: string; apiKey: string; kind?: ProviderKind }) {
-  if (input.kind !== undefined && input.kind !== 'openaiCompatible' && input.kind !== 'openaiCodex') throw new Error('Provider kind is invalid.');
-  if (!input.name.trim()) throw new Error('Provider name is required.');
-  if (!input.baseURL.trim()) throw new Error('Provider baseURL is required.');
-  try {
-    // eslint-disable-next-line no-new
-    new URL(input.baseURL);
-  } catch {
-    throw new Error('Provider baseURL must be a valid URL.');
   }
 }
 
