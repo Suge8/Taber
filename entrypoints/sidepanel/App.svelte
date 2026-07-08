@@ -3,8 +3,8 @@
   import { browser } from 'wxt/browser';
   import { projectAgentEvents } from '$lib/agent-event-projection.ts';
   import { initializeDatabase, listSessions, readLatestSessionSnapshot, readSessionSnapshot, type SessionListItem, type SessionSnapshot } from '$lib/db.ts';
-  import { imagePreviewFromProjection, settingsTabStartsBrowserControlGuide, shouldAdvanceToProviderSetup, sidebarTaskViewFromProjection, sourcesFromProjection, timelineFromProjection, type SettingsTab, type SourceLink } from '$lib/sidepanel-view.ts';
-  import { getReasoningEffort, getSelectedModelId, listProvidersWithModels, setReasoningEffort, setSelectedModelId, type ProviderWithModels, type ReasoningEffort } from '$lib/provider-store.ts';
+  import { controlledTargetFromContext, imagePreviewFromProjection, settingsTabStartsBrowserControlGuide, shouldAdvanceToProviderSetup, sidebarTaskViewFromProjection, sourcesFromProjection, timelineFromProjection, type SettingsTab, type SourceLink } from '$lib/sidepanel-view.ts';
+  import { getReasoningEffort, getSelectedModelId, listProvidersWithModels, normalizeReasoningEffortForModel, setReasoningEffort, setSelectedModelId, type ProviderWithModels, type ReasoningEffort } from '$lib/provider-store.ts';
   import { detectLocale, localeManualStorageKey, localeStorageKey, messages, persistLocale, type Locale } from '$lib/sidepanel-i18n.ts';
   import FadersHorizontal from 'phosphor-svelte/lib/FadersHorizontal';
   import Sparkle from 'phosphor-svelte/lib/Sparkle';
@@ -13,8 +13,9 @@
   import SessionHistory from './SessionHistory.svelte';
   import SourcesBar from './SourcesBar.svelte';
   import Timeline from './Timeline.svelte';
+  import ToastStack from './ToastStack.svelte';
   import Composer from './Composer.svelte';
-  import type { ToastInput, ToastNotice } from './toast.ts';
+  import type { ToastInput, ToastNotice, ToastTone } from './toast.ts';
   import './app.css';
 
   type Theme = 'light' | 'dark' | 'system';
@@ -23,8 +24,6 @@
   let databaseReady = $state(false);
   let providersLoaded = $state(false);
   let browserControlLoaded = $state(false);
-  let databaseError = $state('');
-  let taskError = $state('');
 
   let snapshot = $state<SessionSnapshot | undefined>(undefined);
   let currentSessionId = $state<number | null>(null);
@@ -41,7 +40,7 @@
   let sidepanelWindowId = $state<number | undefined>(undefined);
   let promptedForMissingModel = $state(false);
   let promptedForBrowserControl = $state(false);
-  let settingsToasts = $state<ToastNotice[]>([]);
+  let toasts = $state<ToastNotice[]>([]);
   let nextToastId = 1;
 
   const events = $derived(snapshot?.agentEvents ?? []);
@@ -51,6 +50,7 @@
   const t = $derived(messages[locale]);
   const taskStatus = $derived<TaskStatus>(liveTaskState === 'running' ? 'running' : taskView.status);
   const sources = $derived(sourcesFromProjection(eventProjection, t.sources, taskView.context));
+  const controlledTarget = $derived(controlledTargetFromContext(taskView.context, { ...t.sources, controlledPage: taskStatus === 'running' ? t.sources.controlledPage : t.sources.lastPage }));
   const imagePreview = $derived(imagePreviewFromProjection(eventProjection, t.sources));
   const availableProviders = $derived(providers.filter((provider) => provider.hasCredential));
   const hasAnyModel = $derived(availableProviders.some((provider) => provider.models.some((model) => !model.unavailable && model.visibility !== 'hide')));
@@ -63,7 +63,7 @@
     return undefined;
   });
   const selectedModelLabel = $derived(selectedModel ? (selectedModel.model.displayName ?? selectedModel.model.name) : t.app.noModelSelected);
-  const composerDisabled = $derived(!databaseReady);
+  const composerDisabled = $derived(!databaseReady || sidepanelWindowId === undefined);
   const missingModel = $derived(!hasAnyModel || !selectedModel);
   const missingBrowserControl = $derived(databaseReady && providersLoaded && browserControlLoaded && browserControlState?.ready !== true);
   const providerSetupSpotlight = $derived(databaseReady && providersLoaded && browserControlLoaded && !missingBrowserControl && !hasAnyModel);
@@ -71,10 +71,6 @@
 
   $effect(() => {
     applyTheme(theme);
-  });
-
-  $effect(() => {
-    if (!settingsOpen) settingsToasts = [];
   });
 
   $effect(() => {
@@ -152,7 +148,7 @@
       databaseReady = true;
       await Promise.all([refreshProviders(), refreshBrowserControl(), refreshSessions(), refreshSnapshot()]);
     } catch (error) {
-      databaseError = describe(error);
+      reportLoadError(error);
     }
   }
 
@@ -161,7 +157,7 @@
       browserControlState = await readBrowserControlState();
       browserControlLoaded = true;
     } catch (error) {
-      databaseError = describe(error);
+      reportLoadError(error, 'browser');
     }
   }
 
@@ -169,12 +165,16 @@
     try {
       const [list, selected, effort] = await Promise.all([listProvidersWithModels(), getSelectedModelId(), getReasoningEffort()]);
       const selectableModels = list.flatMap((provider) => provider.hasCredential ? provider.models : []).filter((model) => !model.unavailable && model.visibility !== 'hide');
+      const selectedId = selected && selectableModels.some((model) => model.id === selected) ? selected : selectableModels[0]?.id ?? null;
+      const model = selectableModels.find((item) => item.id === selectedId);
+      const normalizedEffort = normalizeReasoningEffortForModel(effort, model);
       providers = list;
-      selectedModelId = selected && selectableModels.some((model) => model.id === selected) ? selected : selectableModels[0]?.id ?? null;
-      reasoningEffort = effort;
+      selectedModelId = selectedId;
+      reasoningEffort = normalizedEffort;
+      if (normalizedEffort !== effort) await setReasoningEffort(normalizedEffort);
       providersLoaded = true;
     } catch (error) {
-      databaseError = describe(error);
+      reportLoadError(error, 'model');
     }
   }
 
@@ -182,7 +182,7 @@
     try {
       sessions = await listSessions();
     } catch (error) {
-      databaseError = describe(error);
+      reportLoadError(error);
     }
   }
 
@@ -192,7 +192,7 @@
       currentSessionId = snapshot?.session.id ?? null;
       liveTaskState = projectAgentEvents(snapshot?.agentEvents ?? []).taskState === 'running' ? 'running' : 'idle';
     } catch (error) {
-      databaseError = describe(error);
+      reportLoadError(error);
     }
   }
 
@@ -204,76 +204,115 @@
     snapshot = undefined;
     currentSessionId = null;
     liveTaskState = 'idle';
-    taskError = '';
   }
 
   async function handleSelectModel(id: number) {
     try {
       await setSelectedModelId(id);
       selectedModelId = id;
+      const model = providers.flatMap((provider) => provider.models).find((item) => item.id === id);
+      const normalizedEffort = normalizeReasoningEffortForModel(reasoningEffort, model);
+      if (normalizedEffort !== reasoningEffort) {
+        await setReasoningEffort(normalizedEffort);
+        reasoningEffort = normalizedEffort;
+      }
     } catch (error) {
-      databaseError = describe(error);
+      notifyProblem(error, 'error', 'model');
     }
   }
 
   async function handleSelectReasoningEffort(value: ReasoningEffort) {
     try {
-      await setReasoningEffort(value);
-      reasoningEffort = value;
+      const normalizedEffort = normalizeReasoningEffortForModel(value, selectedModel?.model);
+      await setReasoningEffort(normalizedEffort);
+      reasoningEffort = normalizedEffort;
     } catch (error) {
-      databaseError = describe(error);
+      notifyProblem(error, 'error', 'model');
     }
   }
 
   async function handleStart(text: string) {
-    taskError = '';
     if (missingModel) {
       openSettings('providers');
       return;
     }
+    if (sidepanelWindowId === undefined) {
+      notify({ tone: 'info', icon: 'browser', text: t.app.loadingWindow });
+      return;
+    }
     try {
       const message = currentSessionId === null
-        ? { type: 'taber.background.startTask', prompt: text, windowId: sidepanelWindowId }
-        : { type: 'taber.background.startTask', prompt: text, sessionId: currentSessionId, windowId: sidepanelWindowId };
+        ? { type: 'taber.background.startTask', prompt: text, windowId: sidepanelWindowId, locale }
+        : { type: 'taber.background.startTask', prompt: text, sessionId: currentSessionId, windowId: sidepanelWindowId, locale };
       const response = await sendStartTask(message);
       if (isRecord(response) && typeof response.error === 'string') throw new Error(response.error);
       liveTaskState = 'running';
       const sessionId = isRecord(response) && typeof response.sessionId === 'number' ? response.sessionId : undefined;
       await Promise.all([refreshSessions(), refreshSnapshot(sessionId)]);
     } catch (error) {
-      taskError = describe(error);
+      notifyProblem(error, 'error', 'task');
     }
   }
 
   async function handleStop() {
-    taskError = '';
     try {
       const response = await browser.runtime.sendMessage({ type: 'taber.background.stopTask' });
       if (isRecord(response) && typeof response.error === 'string') throw new Error(response.error);
     } catch (error) {
-      taskError = describe(error);
+      notifyProblem(error, 'error', 'task');
     }
   }
 
   async function listWindowTabs() {
-    const query = sidepanelWindowId === undefined ? { currentWindow: true } : { windowId: sidepanelWindowId };
-    const response = await browser.runtime.sendMessage({ type: 'taber.chromeApi.request', action: 'tabs.query', args: [query] });
+    try {
+      return (await queryWindowTabs({})).map((tab) => ({ id: tab.id, title: tab.title ?? '', url: tabUrl(tab), favIconUrl: tab.favIconUrl, active: tab.active }));
+    } catch (error) {
+      notifyProblem(error, 'error', 'browser');
+      return [];
+    }
+  }
+
+  async function queryWindowTabs(extraQuery: Record<string, unknown>) {
+    const query = { ...(sidepanelWindowId === undefined ? { currentWindow: true } : { windowId: sidepanelWindowId }), ...extraQuery };
+    const response = await sendChromeApiRequest('tabs.query', [query]);
     if (!Array.isArray(response)) return [];
-    return response
-      .filter((tab): tab is { id: number; title?: string; url?: string; favIconUrl?: string; active?: boolean } => isRecord(tab) && typeof tab.id === 'number' && /^https?:/i.test(String(tab.url ?? '')))
-      .map((tab) => ({ id: tab.id, title: tab.title ?? '', url: tab.url ?? '', favIconUrl: tab.favIconUrl, active: tab.active }));
+    return response.filter((tab): tab is { id: number; windowId?: number; title?: string; url?: string; pendingUrl?: string; favIconUrl?: string; active?: boolean } => isRecord(tab) && typeof tab.id === 'number' && /^https?:/i.test(tabUrl(tab)));
+  }
+
+  function tabUrl(tab: { url?: unknown; pendingUrl?: unknown }) {
+    return typeof tab.pendingUrl === 'string' ? tab.pendingUrl : typeof tab.url === 'string' ? tab.url : '';
   }
 
   async function openSource(source: SourceLink) {
-    taskError = '';
     try {
       if (source.tabId) {
-        const response = await browser.runtime.sendMessage({ type: 'taber.chromeApi.request', action: 'tabs.update', args: [source.tabId, { active: true }] });
+        const response = await sendChromeApiRequest('tabs.update', [source.tabId, { active: true }]);
         if (!isRecord(response) || typeof response.error !== 'string') return;
       }
-      await browser.runtime.sendMessage({ type: 'taber.chromeApi.request', action: 'tabs.create', args: [{ url: source.url, active: true }] });
+      await sendChromeApiRequest('tabs.create', [{ url: source.url, active: true }]);
     } catch (error) {
-      taskError = describe(error);
+      notifyProblem(error, 'error', 'browser');
+    }
+  }
+
+  async function useCurrentTabAsTarget() {
+    if (taskStatus !== 'running') {
+      notify({ tone: 'warning', icon: 'browser', text: t.sources.switchRequiresRunning });
+      return;
+    }
+    try {
+      const activeTab = (await queryWindowTabs({ active: true }))[0];
+      if (!activeTab) {
+        notify({ tone: 'warning', icon: 'browser', text: t.sources.noOperableActiveTab });
+        return;
+      }
+      const targetTab = { id: activeTab.id, windowId: activeTab.windowId ?? sidepanelWindowId, title: activeTab.title, url: tabUrl(activeTab), favIconUrl: activeTab.favIconUrl };
+      const response = await sendSwitchTarget({ type: 'taber.agent.switchTarget', windowId: targetTab.windowId, targetTabId: targetTab.id, targetTab, reason: 'userCurrentTab' });
+      if (!isRecord(response)) throw new Error(t.sources.switchUnavailable);
+      if (typeof response.error === 'string') throw new Error(response.error);
+      await refreshSnapshot(currentSessionId ?? undefined);
+    } catch (error) {
+      notifyProblem(error, 'error', 'browser');
     }
   }
 
@@ -317,17 +356,59 @@
   }
 
   function sendStartTask(message: unknown) {
-    const hook = (globalThis as typeof globalThis & { __taberSmokeStartTask?: (message: unknown) => Promise<unknown> | unknown }).__taberSmokeStartTask;
-    if (typeof location !== 'undefined' && location.search.includes('taber-smoke=1') && hook) return hook(message);
+    const hook = smokeHooks().__taberSmokeStartTask;
+    if (isSmokePage() && hook) return hook(message);
     return browser.runtime.sendMessage(message);
   }
 
-  function notifySettings(notice: ToastInput) {
+  function sendSwitchTarget(message: unknown) {
+    const hook = smokeHooks().__taberSmokeSwitchTarget;
+    if (isSmokePage() && hook) return hook(message);
+    return browser.runtime.sendMessage(message);
+  }
+
+  function sendChromeApiRequest(action: string, args: unknown[]) {
+    const hook = smokeHooks().__taberSmokeChromeApiRequest;
+    if (isSmokePage() && hook) return hook(action, args);
+    return browser.runtime.sendMessage({ type: 'taber.chromeApi.request', action, args });
+  }
+
+  function smokeHooks() {
+    return globalThis as typeof globalThis & {
+      __taberSmokeStartTask?: (message: unknown) => Promise<unknown> | unknown;
+      __taberSmokeSwitchTarget?: (message: unknown) => Promise<unknown> | unknown;
+      __taberSmokeChromeApiRequest?: (action: string, args: unknown[]) => Promise<unknown> | unknown;
+    };
+  }
+
+  function isSmokePage() {
+    return typeof location !== 'undefined' && location.search.includes('taber-smoke=1');
+  }
+
+  function notify(notice: ToastInput) {
     const id = nextToastId++;
-    settingsToasts = [...settingsToasts, { ...notice, id }].slice(-3);
+    toasts = [...toasts, { ...notice, id }].slice(-3);
     window.setTimeout(() => {
-      settingsToasts = settingsToasts.filter((toast) => toast.id !== id);
-    }, notice.tone === 'error' ? 5200 : 3200);
+      toasts = toasts.filter((toast) => toast.id !== id);
+    }, notice.tone === 'error' || notice.tone === 'warning' ? 5200 : 3200);
+  }
+
+  function notifyProblem(error: unknown, fallbackTone: ToastTone = 'error', icon?: ToastInput['icon']) {
+    const text = describe(error);
+    const noOperableActiveTab = isNoOperableActiveTabError(text);
+    notify({ tone: noOperableActiveTab ? 'warning' : fallbackTone, icon: noOperableActiveTab ? 'browser' : icon, text: friendlyError(text) });
+  }
+
+  function reportLoadError(error: unknown, icon: ToastInput['icon'] = 'database') {
+    notify({ tone: 'error', icon, text: friendlyError(describe(error)) });
+  }
+
+  function friendlyError(text: string) {
+    return isNoOperableActiveTabError(text) ? t.sources.noOperableActiveTab : text;
+  }
+
+  function isNoOperableActiveTabError(text: string) {
+    return /^No operable http\/https active tab in (the side panel|current) window$/i.test(text);
   }
 
   function openShortcutSettings() {
@@ -357,9 +438,7 @@
     </div>
   </div>
 
-  {#if !databaseReady}
-    <div class="flex-1 p-6 pt-16 text-xs text-muted-foreground">{t.app.loadingDatabase}</div>
-  {:else if setupMissing}
+  {#if databaseReady && setupMissing}
     <section class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-7 overflow-hidden px-6 pt-12 text-center">
       <span aria-hidden="true" class="taber-logo-image taber-logo-watermark fx-enter pointer-events-none block" style="--fx-index:0"></span>
       <div class="fx-enter space-y-1.5" style="--fx-index:1">
@@ -375,12 +454,12 @@
         {t.app.getStarted}
       </button>
     </section>
-  {:else}
+  {:else if databaseReady}
     <section class="min-h-0 flex-1 overflow-hidden pt-12">
       <Timeline {locale} entries={timelineEntries} />
     </section>
 
-    <SourcesBar {locale} {sources} {imagePreview} onOpenSource={openSource} />
+    <SourcesBar {locale} {sources} target={controlledTarget} running={taskStatus === 'running'} {imagePreview} onOpenSource={openSource} onUseCurrentTab={useCurrentTabAsTarget} />
 
     <section class="shrink-0 px-3 pb-3 pt-2">
       <Composer
@@ -400,15 +479,14 @@
         onSubmit={handleStart}
         onStop={handleStop}
         listWindowTabs={listWindowTabs}
+        {notify}
       />
-      {#if taskError}<p class="text-danger mt-2 text-xs" role="alert">{taskError}</p>{/if}
     </section>
   {/if}
 
-  {#if databaseError}
-    <p class="text-danger shrink-0 px-3.5 py-2 text-xs" role="alert">{databaseError}</p>
-  {/if}
 </main>
+
+<ToastStack items={toasts} />
 
 <SettingsDialog
   bind:open={settingsOpen}
@@ -423,8 +501,7 @@
   onboarding={!hasAnyModel}
   spotlight={missingBrowserControl}
   providerSpotlight={providerSetupSpotlight}
-  notify={notifySettings}
-  notices={settingsToasts}
+  {notify}
 />
 
 <style>

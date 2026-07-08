@@ -15,7 +15,8 @@
   import * as Dialog from '$lib/components/ui/dialog/index.js';
   import { messages, type Locale } from '$lib/sidepanel-i18n.ts';
   import { createIntentPrompt, orderQuickActions, type IntentQuickActionMode, type QuickActionMode } from '$lib/sidepanel-view.ts';
-  import type { ProviderWithModels, ReasoningEffort } from '$lib/provider-store.ts';
+  import { reasoningEffortOptionsForModel, type ProviderWithModels, type ReasoningEffort } from '$lib/provider-store.ts';
+  import type { Notify } from './toast.ts';
   import Brain from 'phosphor-svelte/lib/Brain';
   import CaretDown from 'phosphor-svelte/lib/CaretDown';
   import Check from 'phosphor-svelte/lib/Check';
@@ -50,6 +51,7 @@
     onSubmit: (text: string) => void | Promise<void>;
     onStop: () => void | Promise<void>;
     listWindowTabs: () => Promise<WindowTab[]>;
+    notify?: Notify;
   }
 
   let {
@@ -69,6 +71,7 @@
     onSubmit,
     onStop,
     listWindowTabs,
+    notify,
   }: Props = $props();
 
   let t = $derived(messages[locale].composer);
@@ -85,7 +88,6 @@
   let modelPickerOpen = $state(false);
   let reasoningPickerOpen = $state(false);
   let skillsOpen = $state(false);
-  let intentError = $state('');
   let tabsLoadToken = 0;
 
   const icons = { summarize: FileText, research: MagnifyingGlass, skills: Sparkle, compare: Scales } as const;
@@ -95,14 +97,12 @@
   const suggestions = $derived(orderQuickActions(context).map((mode) => ({ mode, icon: icons[mode] })));
   const selectedTabs = $derived.by(() => tabs.filter((tab) => selectedTabIds.has(tab.id)));
   const orderedTabs = $derived([...tabs].sort((left, right) => Number(Boolean(right.active)) - Number(Boolean(left.active))));
-  const tabsMenuClass = $derived(!loadingTabs && !intentError && tabs.length === 0 ? 'min-w-32 rounded-2xl p-1.5' : 'w-[min(18rem,calc(100vw-2rem))] rounded-2xl p-2');
+  const tabsMenuClass = $derived(!loadingTabs && tabs.length === 0 ? 'min-w-32 rounded-2xl p-1.5' : 'w-[min(18rem,calc(100vw-2rem))] rounded-2xl p-2');
   const submitDisabled = $derived(disabled || (!activeIntent && draft.trim().length === 0));
-  const reasoningOptions: { value: ReasoningEffort; label: string }[] = $derived([
-    { value: 'default', label: t.reasoningDefault },
-    { value: 'low', label: t.reasoningLow },
-    { value: 'medium', label: t.reasoningMedium },
-    { value: 'high', label: t.reasoningHigh },
-  ]);
+  const selectedModel = $derived(providers.flatMap((provider) => provider.models).find((model) => model.id === selectedModelId));
+  const reasoningOptions: { value: ReasoningEffort; label: string }[] = $derived(
+    reasoningEffortOptionsForModel(selectedModel).map((value) => ({ value, label: reasoningOptionLabel(value) })),
+  );
 
   $effect(() => {
     if (activeIntent && tabsVisible) void refreshTabs();
@@ -130,7 +130,6 @@
 
   async function openIntent(mode: IntentQuickActionMode) {
     activeIntent = activeIntent === mode ? null : mode;
-    intentError = '';
     tabsVisible = false;
     selectedTabIds = new Set();
     if (activeIntent) await refreshTabs();
@@ -143,10 +142,10 @@
       const nextTabs = await listWindowTabs();
       if (token !== tabsLoadToken) return;
       tabs = nextTabs;
-      intentError = '';
     } catch (error) {
       if (token !== tabsLoadToken) return;
-      intentError = error instanceof Error ? error.message : String(error);
+      tabs = [];
+      notify?.({ tone: 'error', icon: 'browser', text: error instanceof Error ? error.message : String(error) });
     } finally {
       if (token === tabsLoadToken) loadingTabs = false;
     }
@@ -154,7 +153,6 @@
 
   function cancelIntent() {
     activeIntent = null;
-    intentError = '';
     tabsVisible = false;
     selectedTabIds = new Set();
   }
@@ -201,13 +199,25 @@
     }
   }
 
+  function reasoningOptionLabel(value: ReasoningEffort) {
+    if (value === 'none') return t.reasoningNone;
+    if (value === 'minimal') return t.reasoningMinimal;
+    if (value === 'low') return t.reasoningLow;
+    if (value === 'medium') return t.reasoningMedium;
+    if (value === 'high') return t.reasoningHigh;
+    if (value === 'xhigh') return t.reasoningXHigh;
+    return t.reasoningDefault;
+  }
+
   function reasoningLabel(value: ReasoningEffort) {
     if (missingModel) return t.reasoningNone;
     return reasoningOptions.find((item) => item.value === value)?.label ?? t.reasoningDefault;
   }
 
   function providerLabel(provider: ProviderWithModels) {
-    return provider.kind === 'openaiCodex' ? providerText.codexProviderName : provider.name;
+    if (provider.kind === 'openaiCodex') return providerText.codexProviderName;
+    if (provider.kind === 'xaiSub') return providerText.xaiProviderName;
+    return provider.name;
   }
 
   function quickActionGridClass() {
@@ -279,8 +289,6 @@
                 <DropdownMenu.Content side="top" align="start" sideOffset={8} class={tabsMenuClass}>
                   {#if loadingTabs}
                     <p class="text-muted-foreground px-2 py-2 text-xs">…</p>
-                  {:else if intentError}
-                    <p class="text-danger px-2 py-2 text-xs" role="alert">{intentError}</p>
                   {:else if tabs.length === 0}
                     <p class="text-muted-foreground whitespace-nowrap px-2 py-1.5 text-xs">{q.noTabs}</p>
                   {:else}
