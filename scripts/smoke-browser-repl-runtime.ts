@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { connectCdp, connectTarget, evaluateStable, fetchJson, hasCdpEndpoint, waitForTarget, type CdpClient } from './cdp-client.mjs';
 import { prepareRuntimeBrowser } from './runtime-browser.mjs';
+import { AGENT_INSTRUCTIONS_VERSION } from '../lib/agent-instructions.ts';
 import { createBrowserReplUserScript } from '../lib/browser-repl-page.ts';
 import type { BrowserReplPageCommand } from '../lib/browser-repl.ts';
 
@@ -238,7 +239,7 @@ async function assertSidepanelLocaleRuntime(extensionCdp: CdpClient, targetTabId
     const prompt = 'Summarize current page for instructions version smoke';
     await submitSidepanelPrompt(extensionCdp, prompt);
     const started = await waitForStartedEventByPrompt(extensionCdp, prompt);
-    assert.equal(started.payload?.instructionsVersion, 2, 'task.started must include instructionsVersion: 2');
+    assert.equal(started.payload?.instructionsVersion, AGENT_INSTRUCTIONS_VERSION, `task.started must include instructionsVersion: ${AGENT_INSTRUCTIONS_VERSION}`);
     const sessionId = readPositiveInteger(started.sessionId, 'completion smoke sessionId');
     const taskId = readString(started.payload?.taskId, 'completion smoke taskId');
     assertModelRequest(await completingServer.readRequest(), 'en');
