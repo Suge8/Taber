@@ -70,6 +70,31 @@ export type Setting = {
   value: unknown;
 };
 
+export type SkillSource = 'agent' | 'user' | 'builtin';
+
+export type Skill = {
+  id: number;
+  name: string;
+  hosts: string[];
+  description: string;
+  content: string;
+  source: SkillSource;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type WorkspaceFile = {
+  id: number;
+  sessionId: number;
+  name: string;
+  mimeType: string;
+  data: ArrayBuffer;
+  size: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type SessionRetentionLimit = number | typeof UNLIMITED_SESSION_RETENTION;
 
 export type SessionSnapshot = {
@@ -88,6 +113,8 @@ export class TaberDatabase extends Dexie {
   toolRuns!: EntityTable<ToolRun, 'id'>;
   agentEvents!: EntityTable<AgentEvent, 'id'>;
   settings!: EntityTable<Setting, 'key'>;
+  skills!: EntityTable<Skill, 'id'>;
+  files!: EntityTable<WorkspaceFile, 'id'>;
 
   constructor() {
     super('taber');
@@ -100,7 +127,33 @@ export class TaberDatabase extends Dexie {
       agentEvents: '++id, sessionId, createdAt, type',
       settings: '&key',
     });
+    this.version(2).stores({
+      skills: '++id, updatedAt, *hosts',
+    });
+    this.version(3).stores({
+      files: '++id, sessionId, &[sessionId+name]',
+    });
+    // Repair skills saved before slug-uniqueness was enforced: /skills/<slug>.md
+    // paths must be unique, so colliding names get a numeric suffix (newest keeps its name).
+    this.version(4).upgrade(async (transaction) => {
+      const table = transaction.table('skills');
+      const skills = (await table.toArray()) as Skill[];
+      const usedSlugs = new Set<string>();
+      const ordered = [...skills].sort((left, right) => right.updatedAt - left.updatedAt || right.id - left.id);
+      for (const skill of ordered) {
+        let name = skill.name;
+        let suffix = 2;
+        while (usedSlugs.has(migrationSkillSlug(name))) name = `${skill.name} ${suffix++}`;
+        usedSlugs.add(migrationSkillSlug(name));
+        if (name !== skill.name) await table.update(skill.id, { name, updatedAt: Date.now() });
+      }
+    });
   }
+}
+
+// Frozen snapshot of lib/skills.ts skillFileName() slug rule at migration time; must not track future changes.
+function migrationSkillSlug(name: string): string {
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '') || 'skill';
 }
 
 export const database = new TaberDatabase();
@@ -210,10 +263,12 @@ export async function pruneOldSessions(limit?: SessionRetentionLimit) {
     database.sessions,
     database.toolRuns,
     database.agentEvents,
+    database.files,
     async () => {
       await Promise.all([
         database.toolRuns.where('sessionId').anyOf(sessionIds).delete(),
         database.agentEvents.where('sessionId').anyOf(sessionIds).delete(),
+        database.files.where('sessionId').anyOf(sessionIds).delete(),
       ]);
       await database.sessions.bulkDelete(sessionIds);
     },
