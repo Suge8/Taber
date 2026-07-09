@@ -19,17 +19,21 @@ async function testGetDocumentController() {
         assert.equal(tabId, 7);
         return { title: 'Quarterly report', url: 'https://example.test/report', selection: 'selected text', html: html.page } as never;
       },
-      async fetchText() {
+      async fetchDocument() {
         throw new Error('fetch blocked');
       },
-      async fetchArrayBuffer() {
-        return new ArrayBuffer(0);
+      async readFile(name: string) {
+        if (name !== 'notes.txt') return undefined;
+        return { mimeType: 'text/plain', data: new TextEncoder().encode('Plain file\n').buffer as ArrayBuffer };
       },
     });
 
-    assert.deepEqual(parseGetDocumentInput({ source: 'file', fileText: 'hello' }), { source: 'file', fileText: 'hello' });
+    assert.deepEqual(parseGetDocumentInput({ source: 'file', name: 'notes.txt' }), { source: 'file', name: 'notes.txt' });
+    assert.throws(() => parseGetDocumentInput({ source: 'file', fileText: 'hello' }), /Unknown getDocument\.file input: fileText/);
     assert.throws(() => parseGetDocumentInput({ source: 'currentPage', mode: 'page', extra: true }), /Unknown getDocument\.currentPage input: extra/);
-    assert.throws(() => parseGetDocumentInput({ source: 'pdf' }), /getDocument.pdf requires url/);
+    assert.throws(() => parseGetDocumentInput({ source: 'url' }), /getDocument.url requires url/);
+    assert.throws(() => parseGetDocumentInput({ source: 'pdf' }), /Invalid getDocument source: pdf/);
+    assert.throws(() => parseGetDocumentInput({ source: 'url', url: 'ftp://x' }), /only supports http\/https/);
     for (const oldSource of ['reader', 'page', 'selection']) {
       assert.throws(() => parseGetDocumentInput({ source: oldSource }), new RegExp(`Invalid getDocument source: ${oldSource}`));
     }
@@ -48,9 +52,12 @@ async function testGetDocumentController() {
     assert.equal(selectionResult.ok, true);
     if (selectionResult.ok) assert.equal(selectionResult.content, 'selected text');
 
-    const fileResult = await controller.run({ source: 'file', fileName: 'notes.txt', fileText: 'Plain file\n' });
+    const fileResult = await controller.run({ source: 'file', name: 'notes.txt' });
     assert.equal(fileResult.ok, true);
-    assert.equal(fileResult.content, 'Plain file\n');
+    if (fileResult.ok) assert.equal(fileResult.content, 'Plain file\n');
+    const missingFile = await controller.run({ source: 'file', name: 'missing.txt' });
+    assert.equal(missingFile.ok, false);
+    if (!missingFile.ok) assert.equal(missingFile.code, 'FILE_NOT_FOUND');
   } finally {
     cleanup();
   }
@@ -65,8 +72,7 @@ async function testGetDocumentReaderDoesNotRefetchCurrentPage() {
       async executeInTab() {
         return { title: 'Current app', url: 'https://example.test/app', selection: '', html: html.reader } as never;
       },
-      async fetchText() { fetched = true; throw new Error('stale network HTML'); },
-      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+      async fetchDocument() { fetched = true; throw new Error('stale network HTML'); },
     });
 
     const result = await controller.run({ source: 'currentPage', mode: 'article' });
@@ -85,17 +91,49 @@ async function testGetDocumentRemoteReaderIncludesTables() {
   );
 }
 
+async function testGetDocumentUrlFetchesHtml() {
+  const { cleanup, html } = installDocumentMarkdownDom();
+  try {
+    const controller = createGetDocumentController({
+      async getCurrentTabId() { throw new Error('url source must not touch tabs'); },
+      async executeInTab() { throw new Error('url source must not inject into page'); },
+      async fetchDocument(url) {
+        assert.equal(url, 'https://remote.test/doc');
+        return { contentType: 'text/html; charset=utf-8', data: new TextEncoder().encode(html.remote).buffer as ArrayBuffer };
+      },
+    });
+
+    const page = await controller.run({ source: 'url', url: 'https://remote.test/doc', mode: 'page', includeTables: true });
+    assert.equal(page.ok, true);
+    if (page.ok) {
+      assert.equal(page.source, 'url');
+      assert.equal(page.url, 'https://remote.test/doc');
+      assert.match(String(page.content), /Remote text/);
+      assert.equal(page.tables?.[0]?.rows[1]?.[1], '3');
+    }
+
+    // article mode falls back to page markdown when Readability yields nothing.
+    const article = await controller.run({ source: 'url', url: 'https://remote.test/doc' });
+    assert.equal(article.ok, true);
+    if (article.ok) {
+      assert.equal(article.fallback, 'page');
+      assert.match(String(article.content), /Remote text/);
+    }
+  } finally {
+    cleanup();
+  }
+}
+
 async function testGetDocumentReaderUrlDoesNotFallback() {
   const controller = createGetDocumentController({
     async getCurrentTabId() { return 2; },
     async executeInTab() {
       throw new Error('pdf should not inject into current page');
     },
-    async fetchText() { throw new Error('unused'); },
-    async fetchArrayBuffer() { throw new Error('remote fetch failed'); },
+    async fetchDocument() { throw new Error('remote fetch failed'); },
   });
 
-  const result = await controller.run({ source: 'pdf', url: 'https://remote.test/article.pdf' });
+  const result = await controller.run({ source: 'url', url: 'https://remote.test/article.pdf' });
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'REMOTE_FETCH_FAILED');
 }
@@ -108,8 +146,7 @@ async function testGetDocumentSelectionFallback() {
       async executeInTab() {
         return { title: 'No selection', url: 'https://example.test/no-selection', selection: '', html: html.selection } as never;
       },
-      async fetchText() { throw new Error('offline'); },
-      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+      async fetchDocument() { throw new Error('offline'); },
     });
 
     const result = await controller.run({ source: 'currentPage', mode: 'selection' });
@@ -179,8 +216,7 @@ async function testGetDocumentCurrentPageBoundaries() {
           ],
         } as never;
       },
-      async fetchText() { throw new Error('offline'); },
-      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+      async fetchDocument() { throw new Error('offline'); },
     });
 
     const result = await controller.run({ source: 'currentPage', mode: 'page' });
@@ -217,8 +253,7 @@ async function testGetDocumentEmptyMainDocumentWithReadableFrameSucceeds() {
           frames: [{ number: 1, title: 'Only Frame', src: 'https://example.test/only-frame', rect: { x: 0, y: 0, width: 200, height: 100 }, sameOrigin: true, readable: true, text: 'Only frame text', chars: 15, truncated: false }],
         } as never;
       },
-      async fetchText() { throw new Error('offline'); },
-      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+      async fetchDocument() { throw new Error('offline'); },
     }).run({ source: 'currentPage', mode: 'page' });
 
     assert.equal(result.ok, true, 'empty main document still succeeds when readable frame text is exposed under frames[]');
@@ -241,8 +276,7 @@ async function testGetDocumentPageSnapshotConversion() {
         assert.equal(tabId, 11);
         return { title: 'Snapshot page', url: 'https://example.test/snapshot', selection: '', html: html.page } as never;
       },
-      async fetchText() { throw new Error('offline'); },
-      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+      async fetchDocument() { throw new Error('offline'); },
     });
 
     const result = await controller.run({ source: 'currentPage', mode: 'page', includeTables: true });
@@ -264,8 +298,7 @@ async function testGetDocumentSelectionSnapshotFallback() {
       async executeInTab() {
         return { title: 'No selection snapshot', url: 'https://example.test/no-selection', selection: '', html: html.selection } as never;
       },
-      async fetchText() { throw new Error('offline'); },
-      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+      async fetchDocument() { throw new Error('offline'); },
     });
 
     const result = await controller.run({ source: 'currentPage', mode: 'selection' });
@@ -285,8 +318,7 @@ async function testGetDocumentReaderCurrentPageSnapshot() {
       async executeInTab() {
         return { title: 'Reader snapshot', url: 'https://example.test/reader', selection: '', html: html.reader } as never;
       },
-      async fetchText() { fetched = true; throw new Error('must not fetch current page'); },
-      async fetchArrayBuffer() { return new ArrayBuffer(0); },
+      async fetchDocument() { fetched = true; throw new Error('must not fetch current page'); },
     });
 
     const result = await controller.run({ source: 'currentPage', mode: 'article' });
@@ -302,11 +334,10 @@ async function testGetDocumentPdf() {
   const controller = createGetDocumentController({
     async getCurrentTabId() { return 1; },
     async executeInTab() { throw new Error('pdf should not inject into page'); },
-    async fetchText() { throw new Error('pdf should not fetch text'); },
-    async fetchArrayBuffer() { return helloPdf(); },
+    async fetchDocument() { return { contentType: 'application/pdf', data: helloPdf() }; },
   });
 
-  const result = await controller.run({ source: 'pdf', url: 'https://example.test/file.pdf' });
+  const result = await controller.run({ source: 'url', url: 'https://example.test/file.pdf' });
   assert.equal(result.ok, true);
   if (result.ok) assert.match(result.content, /Hello PDF/);
 }
@@ -319,9 +350,9 @@ async function testExtractImageController() {
     },
     async captureVisibleTab(input) {
       capturedViewportInputs.push(input);
-      if (input.format === 'jpeg') return 'data:image/jpeg;base64,JPEG=';
+      if (input.format === 'jpeg') return { dataUrl: 'data:image/jpeg;base64,JPEG=' };
       assert.equal(input.format, 'png');
-      return 'data:image/png;base64,AAA=';
+      return { dataUrl: 'data:image/png;base64,AAA=', width: 1280, height: 720 };
     },
     async executeInTab(tabId, input) {
       assert.equal(tabId, 5);
@@ -330,7 +361,7 @@ async function testExtractImageController() {
     },
   });
 
-  assert.deepEqual(await controller.run({ source: 'viewport', format: 'png' }), { ok: true, source: 'viewport', dataUrl: 'data:image/png;base64,AAA=', mediaType: 'image/png' });
+  assert.deepEqual(await controller.run({ source: 'viewport', format: 'png' }), { ok: true, source: 'viewport', dataUrl: 'data:image/png;base64,AAA=', mediaType: 'image/png', width: 1280, height: 720 });
   assert.deepEqual(capturedViewportInputs[0], { source: 'viewport', format: 'png' });
   const jpegResult = await controller.run({ source: 'viewport', format: 'jpeg', jpegQuality: 80 });
   assert.equal(jpegResult.ok, true);
@@ -994,6 +1025,7 @@ function createFakeDebuggerApi() {
 await testGetDocumentController();
 await testGetDocumentReaderDoesNotRefetchCurrentPage();
 await testGetDocumentRemoteReaderIncludesTables();
+await testGetDocumentUrlFetchesHtml();
 await testGetDocumentReaderUrlDoesNotFallback();
 await testGetDocumentSelectionFallback();
 testDocumentMarkdownElementRules();

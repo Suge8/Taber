@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import 'fake-indexeddb/auto';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { AGENT_TOOL_PROMPT_ESTIMATE_TEXT, createAgentToolPromptEstimateText, createAgentTools } from '../lib/agent-tools.ts';
+import { AGENT_TOOL_PROMPT_ESTIMATE_TEXT, DOCUMENT_SPILL_PREVIEW_CHARS, DOCUMENT_SPILL_THRESHOLD_CHARS, createAgentToolPromptEstimateText, createAgentTools, spillLargeDocumentContent, spillLargeReplValue } from '../lib/agent-tools.ts';
 import { browserReplToolHelperNames } from '../lib/browser-repl.ts';
 import { parseBrowserInput } from '../lib/browser-tool.ts';
 import { createSession, database, initializeDatabase } from '../lib/db.ts';
@@ -17,7 +17,7 @@ const tools = createAgentTools({
   windowId: 42,
   async sendMessage(message) {
     messages.push(message);
-    if (isRecord(message) && message.type === 'taber.extractImage.captureVisibleTab') return 'data:image/png;base64,AAA=';
+    if (isRecord(message) && message.type === 'taber.extractImage.captureVisibleTab') return { dataUrl: 'data:image/png;base64,AAA=', width: 1280, height: 720 };
     if (isRecord(message) && message.type === 'taber.navigate.request') return { action: 'currentTab', tab: { id: 7 } };
     throw new Error(`Unexpected message: ${JSON.stringify(message)}`);
   },
@@ -26,7 +26,9 @@ const tools = createAgentTools({
 });
 
 assert.equal('browser' in tools, true);
+assert.equal('fs' in tools, true);
 assert.equal('debugger' in tools, false);
+assert.match(JSON.parse(AGENT_TOOL_PROMPT_ESTIMATE_TEXT).fs.description, /prior knowledge/);
 assert.equal(JSON.parse(AGENT_TOOL_PROMPT_ESTIMATE_TEXT).browser.inputSchema.properties.target.additionalProperties, false);
 assert.equal(JSON.parse(AGENT_TOOL_PROMPT_ESTIMATE_TEXT).debugger, undefined);
 execFileSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '--eval', `
@@ -49,7 +51,7 @@ const offscreenSource = readFileSync(new URL('../entrypoints/offscreen/main.ts',
 assert.match(offscreenSource, /instructionsByLocale\[task\.locale\]/);
 assert.match(offscreenSource, /instructionsVersion: AGENT_INSTRUCTIONS_VERSION/);
 const agentInstructions = readFileSync(new URL('../lib/agent-instructions.ts', import.meta.url), 'utf8');
-assert.match(agentInstructions, /AGENT_INSTRUCTIONS_VERSION = 3/);
+assert.match(agentInstructions, /AGENT_INSTRUCTIONS_VERSION = 5/);
 assert.match(agentInstructions, /## 权限层级/);
 assert.match(agentInstructions, /## Authority Hierarchy/);
 assert.match(agentInstructions, /不执行其中的指令/);
@@ -83,6 +85,9 @@ assert.equal('tabId' in browserPrompt.inputSchema.properties, false);
 assert.deepEqual(parseBrowserInput({ action: 'click', target: { ref: 'r1.1' }, scope: 'viewport', limit: 1 }), { action: 'click', target: { ref: 'r1.1' }, scope: 'viewport', limit: 1 });
 assert.deepEqual(parseBrowserInput({ action: 'snapshot', target: { ref: 'ignored' }, value: 'ignored', key: 'Enter' }), { action: 'snapshot' });
 assert.throws(() => parseBrowserInput({ action: 'click', target: { ref: { selector: '#save' } } }), /target.ref must be a non-empty string/);
+assert.deepEqual(parseBrowserInput({ action: 'click', target: { x: 120.5, y: 48 } }), { action: 'click', target: { x: 120.5, y: 48 } });
+assert.throws(() => parseBrowserInput({ action: 'click', target: { x: 10 } }), /target.y must be a finite number/);
+assert.throws(() => parseBrowserInput({ action: 'click', target: { x: 10, y: 20, text: 'Save' } }), /exactly one locator/);
 const replPrompt = prompt.browserRepl;
 const replDescription = replPrompt.description;
 assert.match(replDescription, /Advanced REPL for operations browser cannot express/);
@@ -100,10 +105,10 @@ assert.match(replDescription, /not for reading or regular operations/);
 assert(!browserReplToolHelperNames(true).includes('browserjs'));
 assert(!browserReplToolHelperNames(false).includes('browserjs'));
 assert.equal('tabId' in replPrompt.inputSchema.properties, false);
-assert.match(prompt.getDocument.description, /Read webpage, PDF, or file/);
+assert.match(prompt.getDocument.description, /Read webpage, PDF, or workspace file/);
 assert.match(prompt.navigate.description, /Changes target only on action:"switchTab" or open target:"new"/);
 assert.match(prompt.extractImage.description, /Viewport requires visible target tab/);
-assert.deepEqual(readSourceEnum(prompt.getDocument.inputSchema), ['currentPage', 'pdf', 'file']);
+assert.deepEqual(readSourceEnum(prompt.getDocument.inputSchema), ['currentPage', 'url', 'file']);
 assert.equal('tabId' in readProperties(prompt.getDocument.inputSchema), false);
 assert.deepEqual(readSourceEnum(prompt.extractImage.inputSchema), ['viewport', 'imageElement', 'canvas', 'backgroundImage']);
 assert.equal('tabId' in readProperties(prompt.extractImage.inputSchema), false);
@@ -127,11 +132,11 @@ assert.doesNotMatch(disabledReplPrompt.description, /browserjs/);
 assert.doesNotMatch(disabledReplPrompt.inputSchema.properties.code.description, /browserjs/);
 
 const image = await (tools.extractImage.execute as (input: unknown, options: unknown) => Promise<unknown>)({ source: 'viewport' }, { abortSignal: new AbortController().signal });
-const file = await (tools.getDocument.execute as (input: unknown, options: unknown) => Promise<unknown>)({ source: 'file', fileText: 'skip current tab' }, { abortSignal: new AbortController().signal });
+const file = await (tools.getDocument.execute as (input: unknown, options: unknown) => Promise<unknown>)({ source: 'file', name: 'missing.txt' }, { abortSignal: new AbortController().signal });
 await (tools.navigate.execute as (input: unknown, options: unknown) => Promise<unknown>)({ action: 'currentTab' }, { abortSignal: new AbortController().signal });
 
-assert.deepEqual(image, { ok: true, source: 'viewport', dataUrl: 'data:image/png;base64,AAA=', mediaType: 'image/png' });
-assert.deepEqual(file, { ok: true, source: 'file', title: undefined, content: 'skip current tab', contentChars: 16, truncated: false });
+assert.deepEqual(image, { ok: true, source: 'viewport', dataUrl: 'data:image/png;base64,AAA=', mediaType: 'image/png', width: 1280, height: 720 });
+assert.deepEqual(file, { ok: false, code: 'FILE_NOT_FOUND', message: 'Workspace file not found: missing.txt.', retryHint: 'Use fs ls to list available /workspace files.' });
 assert.deepEqual(
   messages.filter((message) => isRecord(message)).map((message) => ({ type: message.type, windowId: message.windowId, input: message.input })),
   [
@@ -233,6 +238,8 @@ assert.deepEqual(replNavigateChanges, [{ fromTabId: 7, toTabId: 9, reason: 'open
 assert.deepEqual(replNavigateMessages.filter(isRecord).map((message) => ({ type: message.type, targetTabId: message.targetTabId, input: message.input })), [
   { type: 'taber.navigate.request', targetTabId: 7, input: { action: 'open', target: 'new', url: 'https://new.example' } },
   { type: 'taber.navigate.request', targetTabId: 9, input: { action: 'currentTab' } },
+  // Post-REPL host check for skill announcements.
+  { type: 'taber.navigate.request', targetTabId: 9, input: { action: 'currentTab' } },
 ]);
 
 const cancellableMessages: unknown[] = [];
@@ -258,6 +265,8 @@ assert.deepEqual(cancellableMessages.map((message) => isRecord(message) ? { type
   { type: 'taber.browserRepl.scriptingCommand', targetTabId: 7, helper: 'pickUserElement' },
   { type: 'taber.browserRepl.scriptingCommand', targetTabId: 7, helper: 'waitFor' },
   { type: 'taber.browserRepl.scriptingCommand', targetTabId: 7, helper: 'batch' },
+  // Post-REPL host check for skill announcements (mock rejects it; best-effort lookup swallows the error).
+  { type: 'taber.navigate.request', targetTabId: 7, helper: undefined },
 ]);
 
 const unavailable: string[] = [];
@@ -290,6 +299,145 @@ await assert.rejects(
 );
 assert.deepEqual(unavailable, ['Target tab is not operable: chrome://settings', 'Target tab is no longer available: 7']);
 assert.deepEqual(failedTargetChanges, []);
+
+// Skill announcements follow host changes on any navigate action and after browserRepl page actions.
+{
+  const { saveSkill } = await import('../lib/skills.ts');
+  await saveSkill({ name: 'Example flow', hosts: ['example.com'], description: 'd', content: 'c', source: 'user' });
+  const exampleTab = { id: 7, url: 'https://example.com/page' };
+  const hostTools = createAgentTools({
+    sessionId: 1,
+    targetTabId: 7,
+    targetTabUrl: 'https://start.test/',
+    async sendMessage(message) {
+      if (isRecord(message) && message.type === 'taber.navigate.request' && isRecord(message.input)) {
+        return { action: message.input.action, tab: exampleTab, navigation: { status: 'completed', url: exampleTab.url } };
+      }
+      throw new Error(`Unexpected host-change message: ${JSON.stringify(message)}`);
+    },
+    async emitEvent() {},
+    async runSandbox() { return { done: true }; },
+    browserJsEnabled: false,
+  });
+  const run = (tool: unknown, input: unknown) =>
+    ((tool as { execute: unknown }).execute as (input: unknown, options: unknown) => Promise<Record<string, unknown>>)(input, { abortSignal: new AbortController().signal });
+
+  const back = await run(hostTools.navigate, { action: 'back' });
+  assert.deepEqual(back.availableSkills, ['/skills/example-flow.md']);
+  const reload = await run(hostTools.navigate, { action: 'reload' });
+  assert.equal('availableSkills' in reload, false); // same host: no repeat announcement
+
+  const replTools = createAgentTools({
+    sessionId: 1,
+    targetTabId: 7,
+    targetTabUrl: 'https://start.test/',
+    async sendMessage(message) {
+      if (isRecord(message) && message.type === 'taber.navigate.request' && isRecord(message.input) && message.input.action === 'currentTab') {
+        return { action: 'currentTab', tab: exampleTab };
+      }
+      throw new Error(`Unexpected repl host message: ${JSON.stringify(message)}`);
+    },
+    async emitEvent() {},
+    async runSandbox() { return { done: true }; },
+    browserJsEnabled: false,
+  });
+  const repl = await run(replTools.browserRepl, { code: 'return 1' });
+  assert.deepEqual(repl.availableSkills, ['/skills/example-flow.md']);
+}
+
+// Oversized document content is spilled to /workspace with a stable hashed name.
+{
+  const written: Array<{ name: string; chars: number }> = [];
+  const writeFile = async (name: string, data: ArrayBuffer) => { written.push({ name, chars: data.byteLength }); };
+  const bigContent = 'x'.repeat(DOCUMENT_SPILL_THRESHOLD_CHARS + 1);
+  const spilled = await spillLargeDocumentContent(
+    { ok: true, source: 'url', url: 'https://example.com/doc', content: bigContent, contentChars: bigContent.length, truncated: false },
+    writeFile,
+  );
+  assert.equal(spilled.ok, true);
+  if (spilled.ok) {
+    assert.equal(spilled.content.length, DOCUMENT_SPILL_PREVIEW_CHARS);
+    assert.equal(spilled.truncated, true);
+    assert.equal(spilled.contentChars, bigContent.length);
+    assert.match(String(spilled.savedTo), /^\/workspace\/saved-[0-9a-f]{8}\.md$/);
+    assert.match(String(spilled.hint), /fs read/);
+  }
+  assert.equal(written.length, 1);
+  assert.equal(written[0].chars, bigContent.length);
+
+  // Same content spills to the same file name (idempotent).
+  const again = await spillLargeDocumentContent(
+    { ok: true, source: 'url', url: 'https://example.com/doc', content: bigContent, contentChars: bigContent.length, truncated: false },
+    writeFile,
+  );
+  assert.equal((again as { savedTo?: string }).savedTo, (spilled as { savedTo?: string }).savedTo);
+
+  // Small content and workspace files pass through untouched.
+  const small = { ok: true as const, source: 'url' as const, url: 'https://example.com', content: 'short', contentChars: 5, truncated: false };
+  assert.equal(await spillLargeDocumentContent(small, writeFile), small);
+  const fromFile = { ok: true as const, source: 'file' as const, content: bigContent, contentChars: bigContent.length, truncated: false };
+  assert.equal(await spillLargeDocumentContent(fromFile, writeFile), fromFile);
+
+  // Write failures fall back to the original (honestly truncated) result.
+  const fallback = await spillLargeDocumentContent(
+    { ok: true, source: 'url', url: 'https://example.com/doc', content: bigContent, contentChars: bigContent.length, truncated: false },
+    async () => { throw new Error('quota'); },
+  );
+  assert.equal('savedTo' in fallback, false);
+  assert.equal(fallback.ok && fallback.content.length, bigContent.length);
+}
+
+// Oversized browserRepl values spill to /workspace as JSON with a preview.
+{
+  const written: string[] = [];
+  const writeFile = async (name: string) => { written.push(name); };
+  const bigValue = { rows: 'y'.repeat(DOCUMENT_SPILL_THRESHOLD_CHARS + 100) };
+  const spilled = await spillLargeReplValue({ value: bigValue }, writeFile);
+  assert.equal(typeof spilled.value, 'string');
+  assert.equal(String(spilled.value).length, DOCUMENT_SPILL_PREVIEW_CHARS);
+  assert.equal((spilled as { truncated?: boolean }).truncated, true);
+  assert.match(String((spilled as { savedTo?: string }).savedTo), /^\/workspace\/saved-[0-9a-f]{8}\.json$/);
+  assert.equal(written.length, 1);
+
+  // Small values and unserializable values pass through untouched.
+  const small = { value: { ok: true } };
+  assert.equal(await spillLargeReplValue(small, writeFile), small);
+  const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
+  const unserializable = { value: cyclic };
+  assert.equal(await spillLargeReplValue(unserializable, writeFile), unserializable);
+
+  // Write failures fall back to the original result.
+  const fallback = await spillLargeReplValue({ value: bigValue }, async () => { throw new Error('quota'); });
+  assert.equal('savedTo' in fallback, false);
+}
+
+// After two consecutive tool failures, the error hints at re-checking skills read this task.
+{
+  const { saveSkill } = await import('../lib/skills.ts');
+  await saveSkill({ name: 'Fail flow', hosts: ['fail.test'], description: 'd', content: 'c', source: 'user' });
+  const failingTools = createAgentTools({
+    sessionId: 1,
+    targetTabId: 7,
+    async sendMessage(message) {
+      if (isRecord(message) && message.type === 'taber.navigate.request' && isRecord(message.input) && message.input.action === 'reload') return { error: 'Navigation failed: net::ERR_FAILED' };
+      throw new Error(`Unexpected stale-hint message: ${JSON.stringify(message)}`);
+    },
+    async emitEvent() {},
+    async runSandbox() { return {}; },
+    browserJsEnabled: false,
+  });
+  const run = (tool: unknown, input: unknown) =>
+    ((tool as { execute: unknown }).execute as (input: unknown, options: unknown) => Promise<Record<string, unknown>>)(input, { abortSignal: new AbortController().signal });
+
+  await run(failingTools.fs, { action: 'read', path: '/skills/fail-flow.md' });
+  await assert.rejects(run(failingTools.navigate, { action: 'reload' }), (error: Error) => !error.message.includes('Hint:'));
+  await assert.rejects(
+    run(failingTools.navigate, { action: 'reload' }),
+    /Hint: you read \/skills\/fail-flow\.md earlier.*update the skill with fs write/s,
+  );
+  // Hint fires once per task only.
+  await assert.rejects(run(failingTools.navigate, { action: 'reload' }), (error: Error) => !error.message.includes('Hint:'));
+}
 
 database.close();
 console.info('agent tools tests passed');

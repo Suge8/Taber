@@ -761,7 +761,8 @@ async function testScriptingFallbackResultIsReturned() {
   });
 
   assert.deepEqual(result, { value: { summary: { title: 'fallback' }, elements: [] } });
-  assert.deepEqual(messages.filter(isRecord).map((message) => message.type), [chromeApiRequestType, 'taber.browserRepl.scriptingCommand']);
+  // Trailing navigate.request is the post-REPL host check for skill announcements.
+  assert.deepEqual(messages.filter(isRecord).map((message) => message.type), [chromeApiRequestType, 'taber.browserRepl.scriptingCommand', 'taber.navigate.request']);
 }
 
 async function testBrowserJsUsesUserScriptsMainWorld() {

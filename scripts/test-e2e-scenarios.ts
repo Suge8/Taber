@@ -16,9 +16,10 @@ import {
 import type { BrowserReplPageCommand, BrowserReplSandboxRun } from '../lib/browser-repl.ts';
 import type { ExtractedTable, PageDocument } from '../lib/get-document.ts';
 import type { ExtractImageInput, ExtractImageResult } from '../lib/extract-image.ts';
+import { skillsDigestForUrl } from '../lib/skills.ts';
 
 async function testFixedToolRegistration(harness: E2EHarness) {
-  assert.deepEqual(new Set(Object.keys(harness.tools)), new Set(['getDocument', 'extractImage', 'navigate', 'browser', 'browserRepl']));
+  assert.deepEqual(new Set(Object.keys(harness.tools)), new Set(['getDocument', 'extractImage', 'navigate', 'browser', 'browserRepl', 'fs']));
 }
 
 async function runFiveMvpScenarios(harness: E2EHarness) {
@@ -81,10 +82,53 @@ async function runFiveMvpScenarios(harness: E2EHarness) {
   await appendAgentEvent({ sessionId: harness.sessionId, type: 'task.completed', payload: { taskId: 'task-e2e', text: summary }, now: 99 });
 }
 
+async function testSiteSkillsLoop(harness: E2EHarness) {
+  const saved = await harness.runTool('fs', {
+    action: 'write',
+    path: '/skills/fixture-table-extraction.md',
+    content: '---\nname: Fixture table extraction\nhosts: fixture.test\ndescription: How to extract tables on fixture.test\n---\n\n## Flow\nOpen /table, then getDocument with includeTables.',
+  });
+  assert.deepEqual(saved, { action: 'write', path: '/skills/fixture-table-extraction.md', size: saved.size, mimeType: 'text/markdown' });
+
+  // Announcements fire on host change: leave to another host, then any navigate action landing back announces.
+  const away = await harness.runTool('navigate', { action: 'open', url: 'https://other.test/home', target: 'current' });
+  assert.equal('availableSkills' in away, false);
+  const opened = await harness.runTool('navigate', { action: 'open', url: 'https://fixture.test/table', target: 'current' });
+  assert.deepEqual(opened.availableSkills, ['/skills/fixture-table-extraction.md']);
+
+  const read = await harness.runTool('fs', { action: 'read', path: '/skills/fixture-table-extraction.md' });
+  assert.match(String(read.content), /includeTables/);
+
+  // Same-host actions must not repeat the skill announcement.
+  const snapshot = await harness.runTool('browser', { action: 'snapshot' });
+  assert.equal('availableSkills' in snapshot, false);
+  const reloaded = await harness.runTool('navigate', { action: 'reload' });
+  assert.equal('availableSkills' in reloaded, false);
+
+  const digest = await skillsDigestForUrl('https://fixture.test/table');
+  assert.match(digest, /- \/skills\/fixture-table-extraction\.md: How to extract tables/);
+  assert.match(digest, /live page state always wins/);
+}
+
+async function testFileWorkspaceLoop(harness: E2EHarness) {
+  const written = await harness.runTool('fs', { action: 'write', path: '/workspace/summary.md', content: '# Summary\n\nCollected evidence.' });
+  assert.equal(written.mimeType, 'text/markdown');
+
+  const listing = await harness.runTool('fs', { action: 'ls' });
+  assert.deepEqual(listing.workspace.map((entry: { path: string }) => entry.path), ['/workspace/summary.md']);
+
+  const docx = await harness.runTool('fs', { action: 'write', path: '/workspace/summary.docx', content: '# Summary\n\nCollected evidence.' });
+  assert.equal(docx.mimeType, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+
+  const asDocument = await harness.runTool('getDocument', { source: 'file', name: 'summary.docx' });
+  assert.equal(asDocument.ok, true);
+  assert.match(String(asDocument.content), /Summary[\s\S]*Collected evidence/);
+}
+
 async function testPersistedRecovery(sessionId: number) {
   const snapshot = await readSessionSnapshot(sessionId);
   const toolNames = new Set(snapshot.toolRuns.map((run) => run.toolName));
-  assert.deepEqual([...toolNames].sort(), ['browser', 'browserRepl', 'extractImage', 'getDocument', 'navigate']);
+  assert.deepEqual([...toolNames].sort(), ['browser', 'browserRepl', 'extractImage', 'fs', 'getDocument', 'navigate']);
 
   const eventTypes = snapshot.agentEvents.map((event) => event.type);
   assert(eventTypes.includes('task.started'));
@@ -131,14 +175,14 @@ async function createE2EHarness(): Promise<E2EHarness> {
     emitDebuggerFailure: (url, status, method, context) => broker.emitDebuggerFailure(url, status, method, context),
     pageFor: (url) => broker.pageFor(url),
     async runTool(toolName, input) {
-      const tool = tools[toolName] as unknown as { execute(input: unknown, options: { abortSignal: AbortSignal }): Promise<unknown> } | undefined;
+      const tool = (tools as Record<string, unknown>)[toolName] as { execute(input: unknown, options: { abortSignal: AbortSignal }): Promise<unknown> } | undefined;
       if (!tool) throw new Error(`Unknown tool: ${toolName}`);
       return tool.execute(input, { abortSignal: new AbortController().signal });
     },
   };
 }
 
-type ToolName = 'getDocument' | 'extractImage' | 'navigate' | 'browser' | 'browserRepl';
+type ToolName = 'getDocument' | 'extractImage' | 'navigate' | 'browser' | 'browserRepl' | 'fs';
 type E2EHarness = {
   broker: FakeBrowserBroker;
   sessionId: number;
@@ -190,7 +234,7 @@ class FakeBrowserBroker {
     if (record.type === 'taber.getDocument.extractPage') return this.extractPageDocument(record);
     if (record.type === 'taber.extractImage.captureVisibleTab') {
       assert.deepEqual(record.input, { source: 'viewport', format: 'png' });
-      return 'data:image/png;base64,fixtureviewport';
+      return { dataUrl: 'data:image/png;base64,fixtureviewport', width: 1280, height: 720 };
     }
     if (record.type === 'taber.extractImage.extractPage') return this.extractPageImage(record);
     if (record.type === 'taber.browserRepl.scriptingCommand') return this.executeBrowserReplCommand(record);
@@ -607,6 +651,7 @@ function createFixturePages() {
     ['https://fixture.test/c', new FakePage('https://fixture.test/c', 'Fixture C', 'Gamma metric: 30')],
     ['https://fixture.test/form', new FakePage('https://fixture.test/form', 'Signup Form', 'Email Name Submit')],
     ['https://fixture.test/debug', new FakePage('https://fixture.test/debug', 'Debug Fixture', 'Clicking submit checkout sends a failing API request.')],
+    ['https://other.test/home', new FakePage('https://other.test/home', 'Other Site', 'A different host used for skill announcement scenarios.')],
   ]);
 }
 
@@ -783,6 +828,8 @@ await resetDatabase();
 const harness = await createE2EHarness();
 await testFixedToolRegistration(harness);
 await runFiveMvpScenarios(harness);
+await testSiteSkillsLoop(harness);
+await testFileWorkspaceLoop(harness);
 await testPersistedRecovery(harness.sessionId);
 database.close();
 console.info('e2e scenario tests passed');

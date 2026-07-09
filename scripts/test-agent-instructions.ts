@@ -4,7 +4,7 @@ import { AGENT_INSTRUCTIONS_VERSION, instructionsByLocale } from '../lib/agent-i
 import { deriveModelMessages } from '../lib/model-context.ts';
 import type { AgentEvent } from '../lib/db.ts';
 
-assert.equal(AGENT_INSTRUCTIONS_VERSION, 3);
+assert.equal(AGENT_INSTRUCTIONS_VERSION, 5);
 assert.match(instructionsByLocale.zh, /## 权限层级/);
 assert.match(instructionsByLocale.zh, /## 自主执行/);
 assert.match(instructionsByLocale.zh, /## 安全边界/);
@@ -82,6 +82,24 @@ const evalFixtures: Array<{ name: string; assert(): void }> = [
     assert() {
       assert.match(instructions, /用户手动切标签不改目标|User manual tab switches do not change the target/);
       assert.match(toolPrompt.navigate.description, /Changes target only on action:"switchTab" or open target:"new"/);
+    },
+  },
+  {
+    name: 'Site skills are priors and live page state wins',
+    assert() {
+      assert.match(instructions, /技能与页面实际状态冲突时以页面为准|live page state wins on conflict/);
+      assert.match(instructions, /不保存密钥或个人数据|never store secrets or personal data/);
+      assert.match(toolPrompt.fs.description, /priors, live page state wins/);
+      assert.match(toolPrompt.fs.description, /Never store secrets/);
+    },
+  },
+  {
+    name: 'File workspace covers uploads and exports',
+    assert() {
+      assert.match(instructions, /文件与站点技能 → fs|Files and site skills → fs/);
+      assert.match(instructions, /PDF 需求写 \.md\/\.html|for PDF write \.md\/\.html/);
+      assert.match(toolPrompt.fs.description, /\.docx/);
+      assert.match(toolPrompt.getDocument.description, /workspace file/i);
     },
   },
   {
