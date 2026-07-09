@@ -74,6 +74,14 @@ const en = {
     noTabs: 'No tabs',
     selectedTabs: (count: number) => `${count} tabs selected`,
     cancel: 'Cancel',
+    attach: 'Attach file',
+    attachTooLarge: 'File is too large (max 16MB)',
+    skillsEmpty: 'No site skills yet. Taber saves reusable site knowledge here as it completes tasks; you can also ask it to remember a flow.',
+    skillsHint: 'Site skills are prior knowledge Taber reads before operating a matching site.',
+    skillDisabled: 'Off',
+    skillEnable: 'Enable',
+    skillDisable: 'Disable',
+    skillDelete: 'Delete',
   },
   prompts: {
     summarize: 'Summarize the core content of the current page',
@@ -178,6 +186,12 @@ const en = {
     newSession: 'New session',
     pinned: 'Pinned',
   },
+  files: {
+    title: 'Files',
+    download: 'Download',
+    exportPdf: 'Export PDF',
+    delete: 'Delete',
+  },
   sources: {
     title: 'Sources',
     currentTab: 'Current tab',
@@ -261,6 +275,7 @@ const en = {
       observe: 'Check',
       browserRepl: 'Inspect',
       debugger: 'Debug',
+      fs: 'File',
       tool: 'Tool',
     },
     summary: {
@@ -386,6 +401,14 @@ const zh: SidepanelMessages = {
     noTabs: '无标签页',
     selectedTabs: (count: number) => `已选 ${count} 个标签页`,
     cancel: '取消',
+    attach: '上传文件',
+    attachTooLarge: '文件过大（最大 16MB）',
+    skillsEmpty: '还没有站点技能。Taber 完成任务时会把可复用的站点经验沉淀到这里；你也可以让它记住某个流程。',
+    skillsHint: '站点技能是 Taber 操作匹配站点前会先读的先验知识。',
+    skillDisabled: '已停用',
+    skillEnable: '启用',
+    skillDisable: '停用',
+    skillDelete: '删除',
   },
   prompts: {
     summarize: '总结当前页面的核心内容',
@@ -490,6 +513,12 @@ const zh: SidepanelMessages = {
     newSession: '新建会话',
     pinned: '已置顶',
   },
+  files: {
+    title: '文件',
+    download: '下载',
+    exportPdf: '导出 PDF',
+    delete: '删除',
+  },
   sources: {
     title: '来源',
     currentTab: '当前页',
@@ -573,6 +602,7 @@ const zh: SidepanelMessages = {
       observe: '检查',
       browserRepl: '检查',
       debugger: '调试',
+      fs: '文件',
       tool: '工具',
     },
     summary: {

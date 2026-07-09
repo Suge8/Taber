@@ -16,6 +16,7 @@ export function toolHeaderSummary(tool: ToolPresentationItem, labels: SidepanelM
   if (tool.toolName === 'browser') return labels.tool.summary.generic(`${actionLabel(tool, labels)} ${browserTarget(input, output)}`.trim());
   if (tool.toolName === 'debugger') return debugSummary(output, labels);
   if (tool.toolName === 'browserRepl') return labels.tool.actions.browserRepl;
+  if (tool.toolName === 'fs') return fsSummary(input, output, labels);
   return labels.tool.summary.generic(actionLabel(tool, labels));
 }
 
@@ -36,6 +37,7 @@ function actionKey(tool: ToolPresentationItem) {
   if (tool.toolName === 'browser') return readString(input?.action) || readString(output?.action) || 'browser';
   if (tool.toolName === 'debugger') return 'debugger';
   if (tool.toolName === 'browserRepl') return 'browserRepl';
+  if (tool.toolName === 'fs') return 'fs';
   return 'tool';
 }
 
@@ -94,6 +96,12 @@ function imageSummary(input: Record<string, unknown> | undefined, output: Record
   const size = imageSize(output);
   if (target) return labels.tool.summary.image(target, size);
   return [labels.tool.actions.viewport, size].filter(Boolean).join(' · ');
+}
+
+function fsSummary(input: Record<string, unknown> | undefined, output: Record<string, unknown> | undefined, labels: SidepanelMessages) {
+  const path = readString(output?.path) || readString(input?.path);
+  const target = path ? truncate(path.replace(/^\/(workspace|skills)\//, ''), 28) : readString(input?.action) || '';
+  return target ? `${labels.tool.actions.fs} · ${target}` : labels.tool.actions.fs;
 }
 
 function debugSummary(output: Record<string, unknown> | undefined, labels: SidepanelMessages) {
