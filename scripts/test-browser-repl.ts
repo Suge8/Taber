@@ -1462,6 +1462,35 @@ async function testFrameAwareBrowserRouterCoversIframeRequirements() {
   assert(ambiguous.candidates.some((group: Record<string, any>) => group.frame.context === 'frame'), 'ambiguous candidates must include iframe group');
 }
 
+async function testFrameRouterMainDocumentActionUsesSinglePageCommand() {
+  const calls: string[] = [];
+  const executor = createBrowserReplPageExecutor({
+    async sendMessage(message) {
+      if (isRecord(message) && message.type === chromeApiRequestType && message.action === 'webNavigation.getAllFrames') {
+        calls.push('frames');
+        return [{ frameId: 0, parentFrameId: -1, url: 'https://main.test/page' }];
+      }
+      if (isRecord(message) && message.type === chromeApiRequestType && message.action === 'userScripts.execute') {
+        const command = readInjectedPageCommand((message.args as unknown[])[0] as Record<string, any>);
+        const input = command.args[0] as Record<string, unknown>;
+        calls.push(String(input.action));
+        assert.equal(input.action, 'click');
+        return [{ result: { ok: true, value: { ok: true, action: 'click', evidence: { selector: '#save' }, state: { title: 'After', url: 'https://main.test/page', elements: [{ ref: 'local-ref', number: 1, kind: 'button', tag: 'button', role: 'button', name: 'Next', text: 'Next', rect: { x: 1, y: 2, width: 3, height: 4 } }] } } } }];
+      }
+      throw new Error(`Unexpected main document fast-path message: ${JSON.stringify(message)}`);
+    },
+    readTargetTabId: () => 1,
+    async errorFromResponse(message) { return new Error(message); },
+  });
+
+  const result = await executor.executePageCommand(1, { helper: 'browser', args: [{ action: 'click', target: { text: 'Save' } }] }) as Record<string, any>;
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['frames', 'click']);
+  assert.equal(result.state.elements.length, 1);
+  assert.notEqual(result.state.elements[0].ref, 'local-ref');
+  assert.match(result.state.elements[0].ref, /^b/);
+}
+
 async function testFrameRouterSameOriginIframeEndToEnd() {
   const frames = [
     { frameId: 0, parentFrameId: -1, url: 'https://main.test/page' },
@@ -2222,6 +2251,7 @@ await testRunsSandboxWithNavigateHelper();
 await testIndexesSurviveLaterQueriesInSameBrowserReplCall();
 await testIndexesCannotBeReusedAcrossBrowserReplCalls();
 await testCdpFallbackDispatchesNativeInput();
+await testFrameRouterMainDocumentActionUsesSinglePageCommand();
 await testFrameRouterSameOriginIframeEndToEnd();
 await testFrameRouterCrossOriginPermissionAndBlockedBoundary();
 await testFrameRouterAmbiguousAndSnapshotPrivacy();

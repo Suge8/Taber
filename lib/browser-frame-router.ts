@@ -63,7 +63,7 @@ class BrowserFrameRouter {
 
   private async executeMainAction(tabId: number, command: BrowserReplPageCommand, input: BrowserInput, abortSignal?: AbortSignal) {
     const result = await this.runFrameCommand(tabId, MAIN_FRAME_ID, command, abortSignal) as BrowserResult;
-    return this.withFreshState(tabId, input, result, abortSignal);
+    return shouldResnapshotAfterMainAction(result) ? this.withFreshState(tabId, input, result, abortSignal) : this.withRoutedMainState(tabId, result);
   }
 
   private async executeRefAction(tabId: number, command: BrowserReplPageCommand, input: BrowserInput, ref: string, abortSignal?: AbortSignal) {
@@ -73,11 +73,18 @@ class BrowserFrameRouter {
     if (!frame || frame.url !== routed.frameUrl) return this.staleRef(tabId, input, 'Ref is stale because the target frame changed. Use browser.snapshot again and retry with a new ref.', abortSignal);
     const nextInput = { ...input, target: { ref: routed.localRef } };
     const result = await this.runFrameCommand(tabId, routed.frameId, pageCommand(command, nextInput), abortSignal) as BrowserResult;
-    return this.withFreshState(tabId, input, result, abortSignal);
+    if (routed.frameId !== MAIN_FRAME_ID) return this.withFreshState(tabId, input, result, abortSignal);
+    return shouldResnapshotAfterMainAction(result) ? this.withFreshState(tabId, input, result, abortSignal) : this.withRoutedMainState(tabId, result);
   }
 
   private async executeSemanticAction(tabId: number, command: BrowserReplPageCommand, input: BrowserInput, target: PageTarget, abortSignal?: AbortSignal) {
-    const snapshot = await this.snapshot(tabId, pageCommand(command, snapshotInput(input)), abortSignal) as BrowserResult;
+    const frames = await this.frames(tabId, abortSignal);
+    if (!frames.some((frame) => frame.frameId !== MAIN_FRAME_ID)) {
+      const result = await this.runFrameCommand(tabId, MAIN_FRAME_ID, command, abortSignal) as BrowserResult;
+      return this.withRoutedMainState(tabId, result);
+    }
+
+    const snapshot = await this.snapshot(tabId, pageCommand(command, snapshotInput(input)), abortSignal, frames) as BrowserResult;
     const state = isRecord(snapshot.state) ? snapshot.state : undefined;
     if (!snapshot.ok || !state) return snapshot;
     const resolved = resolveSnapshotTarget(state, target, input.action);
@@ -85,9 +92,9 @@ class BrowserFrameRouter {
     return this.executeRefAction(tabId, command, { ...input, target: { ref: resolved.ref } }, resolved.ref, abortSignal);
   }
 
-  private async snapshot(tabId: number, command: BrowserReplPageCommand, abortSignal?: AbortSignal) {
+  private async snapshot(tabId: number, command: BrowserReplPageCommand, abortSignal?: AbortSignal, knownFrames?: FrameInfo[]) {
     const input = readBrowserInput(command);
-    const frames = await this.frames(tabId, abortSignal);
+    const frames = knownFrames ?? await this.frames(tabId, abortSignal);
     const snapshotId = newSnapshotId();
     this.clearTabRefs(tabId);
     this.latestSnapshotByTab.set(tabId, snapshotId);
@@ -98,7 +105,7 @@ class BrowserFrameRouter {
 
     const state = { ...main.state };
     const parentFrames = Array.isArray(state.frames) ? state.frames : [];
-    state.elements = this.rewriteElements(state.elements, { tabId, frameId: MAIN_FRAME_ID, frameUrl: mainFrame.url, snapshotId });
+    state.elements = this.rewriteElements(state.elements, { tabId, frameId: MAIN_FRAME_ID, frameUrl: mainFrame.url || stringValue(state.url), snapshotId });
 
     const frameStates: Record<string, unknown>[] = [];
     for (const frame of frames.filter((item) => item.frameId !== MAIN_FRAME_ID)) {
@@ -124,6 +131,18 @@ class BrowserFrameRouter {
     } catch (error) {
       return inaccessibleFrame(base, frameAccessReason(error), frame.url);
     }
+  }
+
+  private withRoutedMainState(tabId: number, result: BrowserResult) {
+    const state = isRecord(result.state) ? { ...result.state } : undefined;
+    if (!state) return result;
+    const snapshotId = newSnapshotId();
+    this.clearTabRefs(tabId);
+    this.latestSnapshotByTab.set(tabId, snapshotId);
+    state.elements = this.rewriteElements(state.elements, { tabId, frameId: MAIN_FRAME_ID, frameUrl: stringValue(state.url), snapshotId });
+    state.hints = Array.isArray(state.hints) ? state.hints : [];
+    state.truncated = state.truncated === true;
+    return { ...result, state };
   }
 
   private async withFreshState(tabId: number, input: BrowserInput, result: BrowserResult, abortSignal?: AbortSignal) {
@@ -275,6 +294,10 @@ function isFillCandidate(element: Record<string, unknown>) {
 
 function isDisabled(element: Record<string, unknown>) {
   return isRecord(element.state) && element.state.disabled === true;
+}
+
+function shouldResnapshotAfterMainAction(result: BrowserResult) {
+  return result.ok === false && result.code === 'ACTION_FAILED';
 }
 
 function targetQuery(target: PageTarget) {
