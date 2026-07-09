@@ -118,21 +118,27 @@ function readEncoding(value: Record<string, unknown>, branch: string): { format?
 
 export function createExtractImageController(options: {
   getCurrentTabId(): Promise<number>;
-  captureVisibleTab(input: ExtractImageViewportInput): Promise<string>;
+  captureVisibleTab(input: ExtractImageViewportInput): Promise<{ dataUrl: string; width?: number; height?: number }>;
   executeInTab(tabId: number, input: ExtractImagePageInput): Promise<unknown>;
 }) {
   async function run(value: unknown): Promise<ExtractImageResult> {
     const input = parseExtractImageInput(value);
     if (input.source === 'viewport') {
-      let dataUrl: string;
+      let captured: { dataUrl: string; width?: number; height?: number };
       try {
-        dataUrl = await options.captureVisibleTab(input);
+        captured = await options.captureVisibleTab(input);
       } catch (error) {
         if (isTaskAborted(error)) throw error;
         return screenshotUnavailable();
       }
-      if (!dataUrl.startsWith('data:')) throw new Error('extractImage.viewport returned no data URL');
-      return { ok: true as const, source: 'viewport' as const, dataUrl, mediaType: mediaTypeFromDataUrl(dataUrl) ?? mediaType(input) };
+      if (!captured.dataUrl.startsWith('data:')) throw new Error('extractImage.viewport returned no data URL');
+      return {
+        ok: true as const,
+        source: 'viewport' as const,
+        dataUrl: captured.dataUrl,
+        mediaType: mediaTypeFromDataUrl(captured.dataUrl) ?? mediaType(input),
+        ...(captured.width && captured.height ? { width: captured.width, height: captured.height } : {}),
+      };
     }
     const tabId = input.tabId ?? (await options.getCurrentTabId());
     try {

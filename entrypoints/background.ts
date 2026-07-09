@@ -30,7 +30,7 @@ const agentHost = createAgentHostController({
   lifecycle: offscreenLifecycle,
   sendToHost: (message) => browser.runtime.sendMessage(message),
 });
-type BrowserTabLike = { id?: number; active?: boolean; index?: number; windowId?: number; title?: string; url?: string; pendingUrl?: string; favIconUrl?: string };
+type BrowserTabLike = { id?: number; active?: boolean; index?: number; windowId?: number; title?: string; url?: string; pendingUrl?: string; favIconUrl?: string; width?: number; height?: number };
 
 const sidepanelPath = 'sidepanel.html';
 const toggleSidePanelCommand = 'toggle-side-panel';
@@ -340,7 +340,9 @@ async function captureVisibleTab(message: Record<string, unknown>) {
   if (input.source !== 'viewport') throw new Error('taber.extractImage.captureVisibleTab only supports source=viewport');
   const targetTabId = readTargetTabId(message.targetTabId);
   const tab = targetTabId === undefined ? await currentTab(readWindowId(message.windowId)) : await activateTargetTab(targetTabId);
-  return browser.tabs.captureVisibleTab(requireWindowId(tab), captureVisibleTabDetails(input));
+  const dataUrl = await browser.tabs.captureVisibleTab(requireWindowId(tab), captureVisibleTabDetails(input));
+  // tab.width/height are the viewport size in CSS px: the coordinate space for browser { x, y } targets.
+  return { dataUrl, ...(tab.width && tab.height ? { width: tab.width, height: tab.height } : {}) };
 }
 
 function captureVisibleTabDetails(input: Extract<ExtractImageInput, { source: 'viewport' }>) {
