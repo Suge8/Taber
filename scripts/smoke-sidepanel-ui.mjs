@@ -582,17 +582,30 @@ async function runHistoryPhase(cdp) {
 
 async function runActivityStatusPhase(cdp) {
   const cases = [
-    { title: 'Successful activity', from: '1', to: '3', expected: 'Completed 1 step' },
-    { title: 'Failed activity', from: '3', to: '4', expected: 'Failed after 1 step' },
-    { title: 'Stopped activity', from: '4', to: '5', expected: 'Stopped after 1 step' },
-    { title: 'Streaming text activity', from: '5', to: '6', expected: 'Completed 1 step' },
+    { title: 'Successful activity', from: '1', to: '3', expected: 'Completed 1 step', status: 'completed', tone: 'text-success' },
+    { title: 'Failed activity', from: '3', to: '4', expected: 'Failed after 1 step', status: 'failed', tone: 'text-danger' },
+    { title: 'Stopped activity', from: '4', to: '5', expected: 'Stopped after 1 step', status: 'stopped', tone: 'text-muted-foreground' },
+    { title: 'Recovered activity', from: '5', to: '7', expected: 'Completed 2 steps', status: 'completed', tone: 'text-success' },
+    { title: 'Streaming text activity', from: '7', to: '6', expected: 'Completed 1 step', status: 'completed', tone: 'text-success' },
   ];
   const report = {};
   for (const item of cases) {
     await openHistory(cdp);
     await selectHistoryItem(cdp, item.title, [item.from, item.to]);
     await waitForSessionView(cdp, item.to);
-    report[item.to] = await evaluate(cdp, `document.body.innerText.includes(${JSON.stringify(item.expected)})`);
+    report[item.to] = await evaluate(cdp, `(() => {
+      const group = document.querySelector('[data-activity-status]');
+      const label = group?.querySelector('[data-activity-label]');
+      const probe = document.createElement('span');
+      probe.className = ${JSON.stringify(item.tone)};
+      document.body.append(probe);
+      const expectedColor = getComputedStyle(probe).color;
+      probe.remove();
+      return document.body.innerText.includes(${JSON.stringify(item.expected)})
+        && group?.getAttribute('data-activity-status') === ${JSON.stringify(item.status)}
+        && Boolean(label)
+        && getComputedStyle(label).color === expectedColor;
+    })()`);
   }
   const streamingTextState = await evaluate(cdp, `(() => {
     const group = document.querySelector('[data-activity-status]');
@@ -603,6 +616,7 @@ async function runActivityStatusPhase(cdp) {
     completedGroupSummary: report['3'],
     failedGroupSummary: report['4'],
     stoppedGroupSummary: report['5'],
+    recoveredGroupCompleted: report['7'],
     streamingTextGroupCompleted: report['6'],
     streamingTextGroupNoRunningEffect: streamingTextState,
     activityIconHoverScoped,
@@ -989,6 +1003,7 @@ function seedActivityStatusExpression() {
       sessions.put({ id: 4, title: 'Failed activity', pinned: false, createdAt: now - 70000, updatedAt: now - 60000 });
       sessions.put({ id: 5, title: 'Stopped activity', pinned: false, createdAt: now - 80000, updatedAt: now - 70000 });
       sessions.put({ id: 6, title: 'Streaming text activity', pinned: false, createdAt: now - 90000, updatedAt: now - 80000 });
+      sessions.put({ id: 7, title: 'Recovered activity', pinned: false, createdAt: now - 100000, updatedAt: now - 90000 });
       events.put({ id: 30, sessionId: 3, type: 'task.started', payload: { taskId: 'success-status', prompt: 'success' }, createdAt: now - 59000 });
       events.put({ id: 31, sessionId: 3, type: 'tool.completed', payload: { taskId: 'success-status', toolCallId: 'success-call', toolName: 'getDocument', output: { ok: true } }, createdAt: now - 58000 });
       events.put({ id: 32, sessionId: 3, type: 'task.completed', payload: { taskId: 'success-status', text: '' }, createdAt: now - 57000 });
@@ -1001,6 +1016,11 @@ function seedActivityStatusExpression() {
       events.put({ id: 60, sessionId: 6, type: 'task.started', payload: { taskId: 'streaming-text-status', prompt: 'stream' }, createdAt: now - 89000 });
       events.put({ id: 61, sessionId: 6, type: 'tool.completed', payload: { taskId: 'streaming-text-status', toolCallId: 'streaming-call', toolName: 'getDocument', output: { ok: true } }, createdAt: now - 88000 });
       events.put({ id: 62, sessionId: 6, type: 'message.appended', payload: { taskId: 'streaming-text-status', messageId: 'streaming-answer', role: 'assistant', delta: 'Writing answer…' }, createdAt: now - 87000 });
+      events.put({ id: 70, sessionId: 7, type: 'task.started', payload: { taskId: 'recovered-status', prompt: 'recover' }, createdAt: now - 99000 });
+      events.put({ id: 71, sessionId: 7, type: 'tool.failed', payload: { taskId: 'recovered-status', toolCallId: 'recovered-failed', toolName: 'navigate', error: 'wrong tab' }, createdAt: now - 98000 });
+      events.put({ id: 72, sessionId: 7, type: 'tool.completed', payload: { taskId: 'recovered-status', toolCallId: 'recovered-done', toolName: 'navigate', output: { action: 'open' } }, createdAt: now - 97000 });
+      events.put({ id: 73, sessionId: 7, type: 'message.created', payload: { taskId: 'recovered-status', messageId: 'recovered-answer', role: 'assistant', text: 'Recovered answer' }, createdAt: now - 96000 });
+      events.put({ id: 74, sessionId: 7, type: 'task.completed', payload: { taskId: 'recovered-status', text: 'Recovered answer' }, createdAt: now - 95000 });
       tx.oncomplete = () => { db.close(); resolve(true); };
       tx.onerror = () => { db.close(); reject(tx.error); };
     };

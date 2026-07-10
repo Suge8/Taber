@@ -332,12 +332,12 @@ function createTaskAssistantTurn(group: ProjectedTaskGroup, tools: ProjectedTool
 
   if (parts.length === 0) return undefined;
   const updatedAt = Math.max(...parts.map((part) => partUpdatedAt(part)));
-  return { id: group.taskId, taskId: group.taskId, status: taskTurnStatus(group, tools), createdAt: parts[0]?.createdAt ?? 0, updatedAt, parts };
+  return { id: group.taskId, taskId: group.taskId, status: taskTurnStatus(group), createdAt: parts[0]?.createdAt ?? 0, updatedAt, parts };
 }
 
-function taskTurnStatus(group: ProjectedTaskGroup, tools: ProjectedToolRun[]): ProjectedAssistantTimelineTurn['status'] {
+function taskTurnStatus(group: ProjectedTaskGroup): ProjectedAssistantTimelineTurn['status'] {
   if (group.status === 'running') return 'running';
-  if (group.status === 'failed' || tools.some((tool) => tool.status === 'failed')) return 'failed';
+  if (group.status === 'failed') return 'failed';
   if (group.status === 'cancelled') return 'cancelled';
   return 'completed';
 }

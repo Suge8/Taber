@@ -187,6 +187,25 @@ assert.match(progressTimeline[1].kind === 'assistantTurn' && progressTimeline[1]
 }
 
 {
+  const recoveredTimeline = deriveTimeline([
+    { id: 1, sessionId: 1, type: 'task.started', payload: { taskId: 'recovered-group', prompt: 'go' }, createdAt: 1 },
+    { id: 2, sessionId: 1, type: 'tool.failed', payload: { taskId: 'recovered-group', toolCallId: 'failed-call', toolName: 'navigate', error: 'wrong tab' }, createdAt: 2 },
+    { id: 3, sessionId: 1, type: 'tool.completed', payload: { taskId: 'recovered-group', toolCallId: 'done-call', toolName: 'navigate', output: { action: 'open' } }, createdAt: 3 },
+    { id: 4, sessionId: 1, type: 'reasoning.completed', payload: { taskId: 'recovered-group', reasoningId: 'final-check', text: 'verified' }, createdAt: 4 },
+    { id: 5, sessionId: 1, type: 'message.created', payload: { taskId: 'recovered-group', messageId: 'answer', role: 'assistant', text: '' }, createdAt: 5 },
+    { id: 6, sessionId: 1, type: 'message.appended', payload: { taskId: 'recovered-group', messageId: 'answer', delta: 'Done' }, createdAt: 6 },
+    { id: 7, sessionId: 1, type: 'task.completed', payload: { taskId: 'recovered-group', text: 'Done' }, createdAt: 7 },
+  ]);
+  const recoveredTurn = recoveredTimeline[1];
+  assert.ok(recoveredTurn.kind === 'assistantTurn');
+  assert.equal(recoveredTurn.turn.status, 'completed');
+  const recoveredBlock = groupTurnParts(recoveredTurn.turn.parts)[0];
+  assert.ok(recoveredBlock.kind === 'activity');
+  assert.equal(recoveredBlock.parts.some((part) => part.kind === 'tool' && part.tool.status === 'failed'), true);
+  assert.equal(activityGroupStatus(recoveredBlock.parts, recoveredTurn.turn.status, false), 'completed');
+}
+
+{
   const failedTimeline = deriveTimeline([
     { id: 1, sessionId: 1, type: 'task.started', payload: { taskId: 'failed-group', prompt: 'go' }, createdAt: 1 },
     { id: 2, sessionId: 1, type: 'tool.started', payload: { taskId: 'failed-group', toolCallId: 'failed-call', toolName: 'navigate', input: {} }, createdAt: 2 },

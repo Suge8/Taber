@@ -36,6 +36,14 @@
   let t = $derived(messages[locale]);
   let open = $state(false);
   const toolLabels = $derived({ pending: t.tool.pending, running: t.tool.running, completed: t.tool.completed, error: t.tool.error, warning: t.tool.warning });
+  const stateClasses: Record<ActivityGroupStatus, { card: string; label: string }> = {
+    running: { card: 'fx-beam ring-primary/15', label: 'fx-shimmer-text' },
+    completed: { card: 'ring-success/30', label: 'text-success' },
+    failed: { card: 'ring-danger/30', label: 'text-danger' },
+    stopped: { card: 'ring-line/55', label: 'text-muted-foreground' },
+    warning: { card: 'ring-warn/30', label: 'text-warn' },
+  };
+  let stateClass = $derived(stateClasses[status]);
 
   // Elapsed clock while live: timer display is the business semantics here.
   let now = $state(Date.now());
@@ -88,13 +96,6 @@
           : status === 'warning' ? t.activity.warning(parts.length)
             : t.activity.completed(parts.length),
   );
-  let cardStateClass = $derived(
-    live ? 'fx-beam ring-primary/15'
-      : status === 'failed' ? 'ring-danger/30'
-        : status === 'warning' ? 'ring-warn/30'
-          : 'ring-line/55',
-  );
-  let labelStateClass = $derived(status === 'failed' ? 'text-danger' : status === 'warning' ? 'text-warn' : '');
   let stack = $derived(parts.slice(-3));
   let elapsedMs = $derived(live ? Math.max(0, now - activityStartedAt(parts)) : Math.max(0, activityEndedAt(parts) - activityStartedAt(parts)));
   let duration = $derived(formatDuration(elapsedMs));
@@ -242,7 +243,7 @@
 <Collapsible
   bind:open
   data-activity-status={status}
-  class="not-prose w-full rounded-3xl bg-surface shadow-[inset_0_1px_0_oklch(1_0_0_/_0.06),0_1px_2px_oklch(0_0_0_/_0.04),0_16px_40px_oklch(0_0_0_/_0.08)] ring-1 transition-[box-shadow] duration-300 {cardStateClass}"
+  class="not-prose w-full rounded-3xl bg-surface shadow-[inset_0_1px_0_oklch(1_0_0_/_0.06),0_1px_2px_oklch(0_0_0_/_0.04),0_16px_40px_oklch(0_0_0_/_0.08)] ring-1 transition-[box-shadow] duration-300 {stateClass.card}"
 >
   <CollapsibleTrigger data-activity-trigger class="group flex w-full items-center gap-3.5 px-4 py-3.5 text-left">
     <span class="relative flex shrink-0 items-center -space-x-3">
@@ -262,7 +263,7 @@
     </span>
     <span class="fx-roll-mask relative grid h-9 min-w-0 flex-1 items-center overflow-hidden">
       {#key label}
-        <span in:rollIn out:rollOut class="col-start-1 row-start-1 min-w-0 truncate text-[14.5px] font-semibold leading-9 tracking-[-0.01em] {live ? 'fx-shimmer-text' : labelStateClass}">{label}</span>
+        <span data-activity-label in:rollIn out:rollOut class="col-start-1 row-start-1 min-w-0 truncate text-[14.5px] font-semibold leading-9 tracking-[-0.01em] {stateClass.label}">{label}</span>
       {/key}
     </span>
     <span class="flex shrink-0 items-center gap-2 leading-none tabular">

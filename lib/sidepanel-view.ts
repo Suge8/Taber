@@ -114,12 +114,15 @@ export function activePart(parts: ActivityPart[]): ActivityPart {
 }
 
 export function activityGroupStatus(parts: ActivityPart[], turnStatus: AssistantTimelineTurn['status'], terminalGroup: boolean): ActivityGroupStatus {
-  const failedTool = parts.some((part) => part.kind === 'tool' && part.tool.status === 'failed');
-  if (failedTool || (terminalGroup && turnStatus === 'failed')) return 'failed';
+  if (terminalGroup && turnStatus === 'failed') return 'failed';
   if (terminalGroup && turnStatus === 'cancelled') return 'stopped';
   if (terminalGroup && turnStatus === 'running') return 'running';
-  if (parts.some(isActiveActivityPart)) return 'stopped';
-  if (parts.some((part) => part.kind === 'tool' && isRecoverableActivityOutput(part.tool.output))) return 'warning';
+
+  const latest = parts.at(-1);
+  if (!latest) return 'completed';
+  if (isActiveActivityPart(latest)) return 'stopped';
+  if (latest.kind === 'tool' && latest.tool.status === 'failed') return 'failed';
+  if (latest.kind === 'tool' && isRecoverableActivityOutput(latest.tool.output)) return 'warning';
   return 'completed';
 }
 
