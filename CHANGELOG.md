@@ -4,6 +4,170 @@
   <a href="#english">🇺🇸 English</a> · <a href="#中文">🇨🇳 中文</a>
 </p>
 
+## 0.4.0 - 2026-07-10
+
+### English
+
+#### Highlights
+
+- Rebuilt the side-panel timeline around compact activity groups that combine reasoning and tool work without hiding execution evidence.
+- Hardened long-running Agent tasks with bounded steps, per-step and total timeouts, stream health checks, and explicit terminal failures.
+- Expanded builtin site skills from 8 to 27, organized into ticketing, shopping, social, video, travel, developer, and reference categories.
+- Added GPT-5.6 Sol, Terra, and Luna support across OpenAI-compatible and ChatGPT/Codex flows.
+- Decoupled task startup from page access: pure Q&A can begin on new-tab or restricted pages, then navigate to an operable page.
+- Added exportable session diagnostics so persisted Agent behavior can be inspected without reproducing the task.
+
+#### Added
+
+- Activity groups with running, completed, failed, stopped, and recoverable-warning states; each group reports step count and elapsed duration.
+- Expandable activity details for every reasoning and tool step, including copyable raw tool input, output, and error evidence.
+- Activity auto-follow: opening a group jumps to the newest step, follows live additions, pauses when the user scrolls up, and resumes near the bottom.
+- One-line JSONL session export from Settings → Preferences → Diagnostics. Strings over 2,048 characters and screenshot data URLs are truncated to reviewable previews.
+- `scripts/dump-session-events.ts` for listing and exporting sessions from a CDP-reachable Taber instance, plus `docs/debugging.md` with event signatures and failure diagnosis.
+- Stream guards for malformed tool JSON, content after complete JSON, mismatched delimiters, oversized tool input, oversized step output, and degenerate whitespace runs.
+- A 180-second stream idle timeout, 5-minute per-step timeout, 30-minute task timeout, and explicit 20-step tool-loop ceiling.
+- Seven localized skill categories with per-skill and per-category enable controls; custom user/Agent skills remain a separate first-class group.
+- Nineteen new builtin skills for Tixbay, Damai, Ticketmaster, StubHub, Amazon, Taobao, JD, eBay, X, Xiaohongshu, Weibo, Zhihu, Instagram, YouTube, Bilibili, Douyin, TikTok, Booking.com, and Airbnb.
+- Chinese names and descriptions for all 27 builtin skills, while stored skill identifiers remain stable.
+- Prompt-based skill pre-matching: tasks can discover a site skill from a site name in the request before the first navigation.
+- GPT-5.6 Sol, Terra, and Luna presets with 1,050,000-token context windows; OpenRouter also includes `openai/gpt-5.6-sol`.
+- Weekly staleness checks for the cached models.dev catalog, refreshed in the background from provider settings.
+- ADR 0018 documenting task startup and recovery from non-operable target tabs.
+
+#### Changed
+
+- Consecutive reasoning and tool events now render as one activity block; assistant text splits blocks and keeps the original event order.
+- Cancelled tasks render as stopped rather than looking active; recoverable tool results render as warnings instead of false success or fatal failure.
+- Live side-panel events insert by event ID and deduplicate; session snapshots also read Agent events by ID rather than wall-clock timestamps.
+- Quick actions use a stable Summarize, Skills, Research, Compare order instead of guessing intent from the current URL or page title.
+- The Skills panel groups builtins by category, exposes localized metadata, supports whole-group toggles, and keeps custom skills visible for discovery.
+- Matching skills are mandatory prior reading. Tasks that need at least four exploratory tool calls to discover a reusable route must save or update a skill before finishing.
+- Builtin skills seed before the side panel becomes ready, so the Skills panel is populated before the first Agent task creates an offscreen host.
+- Tasks lock any active tab that exists, including `chrome://`, `edge://`, and new-tab pages; page-access failures remain recoverable while missing or closed targets remain fatal.
+- Page tools operate on the locked target in the background without activating it on every call.
+- `navigate.switchTab` changes the task target without stealing focus; `navigate.open target:"new"` opens in the background unless `active:true` is requested.
+- Viewport screenshots temporarily activate the target because Chrome only captures the visible tab, then restore the prior tab only if the user did not switch during capture.
+- Navigation load timeouts return `navigation.status:"timeout"` with inspectable tab state. Superseded `net::ERR_ABORTED` navigations keep waiting for the replacement navigation.
+- Browser refs survive the immediately preceding routed snapshot and ordinary page mutations while marker, visibility, frame URL, tag, and fingerprint checks still reject changed targets.
+- Structured browser target parsing drops empty placeholder fields, prefers an explicit snapshot ref over echoed semantic fields, and lets semantic locators outrank placeholder coordinates.
+- `getDocument` and `extractImage` ignore irrelevant padded fields from model-generated tool input while preserving required-field and value validation.
+- Model lists sort newer numeric generations first, then provider priority; subscription model chips can expand from the preview to the full list.
+- Codex OAuth, model discovery, and inference identify as official `codex_cli_rs` client `0.144.1`, including the inference version header required by gated models.
+- OpenAI and Codex requests ask for detailed reasoning summaries only on models that declare reasoning support; non-reasoning models receive no reasoning fields.
+- Side-panel icons now use the existing Lucide package throughout. The unused `phosphor-svelte` production dependency was removed.
+- Settings, provider onboarding, session history, composer, sources, files, toasts, and subscription cards share one motion and interaction system with reduced-motion fallback.
+- Session history positions the current item below its sticky action row and uses bidirectional view transitions for old, new, and rapidly switched sessions.
+
+#### Fixed
+
+- Streaming text, reasoning, and tool-input deltas flush at 512 characters or within 300 ms, reducing IndexedDB transactions without waiting for another delta.
+- Buffered event types and IDs flush in sequence before lifecycle events, preserving the exact persisted and live event order.
+- Out-of-order runtime broadcasts no longer disappear, and duplicate broadcasts no longer create duplicate timeline parts.
+- Invalid model tool input now creates a persisted `tool.failed` event instead of leaving the activity permanently pending.
+- Active partial tool inputs receive failure events when a stream health guard stops generation.
+- A stream ending at the tool-loop limit now fails with a narrow-task retry message instead of reporting an empty or successful response.
+- Internal timeout aborts are distinguished from user cancellation and reported as execution timeouts.
+- Provider errors retain up to 600 characters of upstream response context after credential redaction, preserving messages such as “Model not found.”
+- Remote document fetches stop after 30 seconds and retain HTTP, CORS, timeout, or network reasons in recoverable results.
+- Page-access and screenshot failures retain the browser’s original reason alongside Browser Control guidance.
+- Explicit mismatched `tabId` values fail before browser access in `getDocument`, all `extractImage` sources including viewport, `browser`, `browserRepl`, debug-only `debugger`, and every non-switch navigation action.
+- The background broker and navigate controller enforce the same target boundary, so direct internal calls cannot bypass Agent runtime validation.
+- A user tab switch before or during viewport capture rejects the screenshot and never restores focus over the user’s newer selection.
+- Non-operable targets no longer trigger fatal task cancellation; only a closed or missing target ends the task, with no fallback to another active tab.
+- Navigation no longer activates the target for open, back, forward, reload, current-tab reads, debugger calls, or page-tool validation.
+- `fs read` trims accidental model output after a `.md` skill path instead of turning a valid skill lookup into a not-found error.
+- Session switching rejects stale async reads, so rapid History → New Session actions cannot be overwritten by an older request.
+- Stopped and completed activity groups no longer retain running beam or breathing effects.
+- Skill reads and writes use a distinct “site skill” label instead of appearing as generic file operations.
+- Side-panel runtime smoke now handles Chrome 150 API namespaces, CSS-transformed labels, icon-only controls, and short history lists without weakening user-facing assertions.
+
+#### Security
+
+- Only `navigate.switchTab`, `navigate.open target:"new"`, or explicit side-panel confirmation may retarget a task; all other cross-target IDs fail with a recovery instruction.
+- Starting from a restricted page does not widen host permissions or page access. Page tools fail explicitly until navigation reaches an allowed page.
+- Release builds still omit `debugger` and cookies permissions. Detailed reasoning uses provider summaries and does not expose raw chain-of-thought.
+
+### 中文
+
+#### 重点
+
+- 侧边栏时间线改为紧凑活动组，把 reasoning 与工具过程收进同一条执行轨迹，同时保留完整证据。
+- Agent 长任务新增步数、单步/总时长、流健康检查和明确终止错误，不再无限生成或假完成。
+- 内置站点技能从 8 个扩展到 27 个，按票务、购物、社交、视频、旅行、开发和知识七类管理。
+- OpenAI-compatible 与 ChatGPT/Codex 流程新增 GPT-5.6 Sol、Terra、Luna 支持。
+- 任务启动与页面访问解耦：可从新标签页或受限页面开始纯问答，再导航到可操作页面。
+- 新增可导出的会话诊断，不必复现任务即可检查已持久化的 Agent 行为。
+
+#### 新增
+
+- 活动组支持运行、完成、失败、停止和可恢复警告五种状态，显示步骤数与执行时长。
+- 每个 reasoning 和工具步骤均可展开，保留可复制的原始工具输入、输出与错误证据。
+- 活动自动跟随：展开后跳到最新步骤；实时追加时持续跟随；用户上翻后暂停，回到底部恢复。
+- 设置 → 偏好 → 诊断新增 JSONL 会话导出。超过 2,048 字符的字符串和截图 data URL 会截成可审阅预览。
+- 新增 `scripts/dump-session-events.ts`，可从支持 CDP 的 Taber 实例列出并导出会话；`docs/debugging.md` 记录事件特征和故障判读。
+- 流守护覆盖非法工具 JSON、完整 JSON 后续写、括号不匹配、超大工具入参、超大单步输出和退化空白输出。
+- 新增 180 秒流空闲超时、5 分钟单步超时、30 分钟任务超时和明确的 20-step 工具循环上限。
+- 新增七类本地化技能分组与单技能/整组开关；用户和 Agent 自建技能保留独立的自定义分组。
+- 新增 19 个内置技能：Tixbay、大麦、Ticketmaster、StubHub、Amazon、淘宝、京东、eBay、X、小红书、微博、知乎、Instagram、YouTube、B站、抖音、TikTok、Booking.com、Airbnb。
+- 27 个内置技能全部补齐中文名称和描述，存储层技能标识保持稳定。
+- 新增 prompt 预匹配：用户请求中出现站名时，首次导航前即可发现对应技能。
+- 新增 GPT-5.6 Sol、Terra、Luna 预设，context window 为 1,050,000 tokens；OpenRouter 同步加入 `openai/gpt-5.6-sol`。
+- models.dev 缓存每周检查时效，在供应商设置中后台刷新新模型和 context window。
+- 新增 ADR 0018，记录不可操作 target tab 的任务启动与恢复语义。
+
+#### 变更
+
+- 连续 reasoning 和工具事件合并为活动块；assistant 文本负责分隔活动块，原始事件顺序不变。
+- 已取消任务显示为停止；可恢复工具结果显示为警告，不再伪装成功或误报 fatal。
+- 侧边栏实时事件按 ID 插入并去重；会话快照也按事件 ID 而不是本地时间排序。
+- 快捷操作固定为总结、技能、调研、比价，不再根据当前 URL 或标题猜测并重排。
+- 技能面板按类别展示内置技能，显示本地化元数据，支持整组开关，并固定展示自定义技能入口。
+- 匹配到技能后必须先读；若任务至少花 4 次探索性工具调用才找到可复用路径，结束前必须新增或更新技能。
+- 侧边栏完成初始化前先写入内置技能，首次 Agent 任务尚未创建 offscreen host 时技能面板也有完整内容。
+- 任务锁定任何存在的 active tab，包括 `chrome://`、`edge://` 和新标签页；页面访问失败可恢复，target 缺失或关闭才 fatal。
+- 页面工具直接操作锁定的后台 target，不再每次调用都激活标签页。
+- `navigate.switchTab` 切换任务 target 时不抢焦点；`navigate.open target:"new"` 默认后台打开，只有 `active:true` 才激活。
+- Chrome 只能截可见标签页，因此 viewport 截图会临时激活 target；仅当用户没有切走时才恢复之前的标签页。
+- 页面 load 超时返回可检查的 `navigation.status:"timeout"`；被后续导航替代的 `net::ERR_ABORTED` 继续等待新导航。
+- browser ref 可跨最近一次 routed snapshot 和普通页面变动继续使用；marker、可见性、frame URL、tag 与 fingerprint 仍负责拒绝真实失效目标。
+- browser target 解析会丢弃空占位字段，优先采用显式 snapshot ref，并让语义定位优先于占位坐标。
+- `getDocument` 与 `extractImage` 忽略模型补齐的无关字段，同时继续校验必填字段和字段值。
+- 模型列表先按数字版本从新到旧排序，再按供应商 priority；订阅模型 chip 可从预览展开为完整列表。
+- Codex OAuth、模型发现和推理统一使用官方 `codex_cli_rs`、客户端版本 `0.144.1`，推理请求携带 gated model 所需 version header。
+- OpenAI/Codex 仅对声明支持 reasoning 的模型请求 detailed reasoning summary；非 reasoning 模型不再收到 reasoning 字段。
+- 侧边栏图标统一复用已有 Lucide 包，删除未使用的 `phosphor-svelte` 生产依赖。
+- 设置、供应商引导、会话历史、输入区、来源、文件、toast 和订阅卡统一动效与交互规则，并支持 reduced motion。
+- 会话历史会把当前项定位到 sticky 操作区下方；旧会话、新会话和快速切换使用双向视图过渡。
+
+#### 修复
+
+- 文本、reasoning 和工具入参 delta 达到 512 字符或最迟 300 ms 刷新，减少 IndexedDB 事务且不依赖下一段 delta。
+- 不同事件类型和 ID 在生命周期事件前按顺序 flush，保证持久化事件与实时事件顺序一致。
+- 乱序 runtime broadcast 不再丢失，重复 broadcast 不再生成重复时间线节点。
+- 模型生成的非法工具入参会持久化 `tool.failed`，不再让活动永久停在 pending。
+- 流健康守护中止生成时，会给仍未完成的工具入参写入失败事件。
+- 工具循环达到上限却没有最终回复时明确失败，并提示缩小任务范围，不再返回空结果或假成功。
+- 内部超时 abort 与用户主动取消分开表达，内部超时会报告执行超时。
+- 供应商错误在凭证脱敏后保留最多 600 字符上游响应，`Model not found` 等事实可直接诊断。
+- 远程文档 fetch 最长 30 秒，并在可恢复结果中保留 HTTP、CORS、timeout 或网络失败原因。
+- 页面访问与截图失败同时保留浏览器原始原因和 Browser Control 操作指引。
+- `getDocument`、全部 `extractImage` source（含 viewport）、`browser`、`browserRepl`、debug-only `debugger` 和所有非切换导航动作都会在访问浏览器前拒绝错误 `tabId`。
+- background broker 与 navigate controller 同步执行 target 边界，内部直接调用也不能绕过 Agent runtime 校验。
+- 用户在 viewport 截图前或截图中切 tab 时会拒绝截图，也不会把焦点恢复到用户的新选择之上。
+- 不可操作 target 不再触发任务 fatal；只有 target 关闭或不存在才结束任务，且绝不回退到其他 active tab。
+- open、back、forward、reload、current-tab 读取、debugger 和页面工具校验不再激活 target。
+- `fs read` 会截掉 `.md` 技能路径后模型误带的垃圾字符，避免有效技能被误报不存在。
+- 会话切换会拒绝过期异步读取，快速执行“历史会话 → 新会话”时不会被旧请求覆盖。
+- 已停止和已完成活动组不再残留运行中的 beam 或呼吸效果。
+- 技能读写显示独立的“站点技能”标签，不再混为普通文件操作。
+- 侧边栏 runtime smoke 兼容 Chrome 150 API namespace、CSS 文案变换、纯图标控件和短会话列表，同时保留用户行为断言。
+
+#### 安全
+
+- 只有 `navigate.switchTab`、`navigate.open target:"new"` 或侧边栏明确确认可以切换任务 target；其他跨 target ID 全部失败并给出恢复指引。
+- 从受限页面启动任务不会扩大 host permission 或页面访问能力；导航到获准页面前，页面工具会明确失败。
+- 发布构建继续排除 `debugger` 和 cookies 权限；detailed reasoning 使用供应商 summary，不展示原始 chain-of-thought。
+
 ## 0.3.0 - 2026-07-09
 
 ### English
