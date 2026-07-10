@@ -4,6 +4,50 @@
   <a href="#english">🇺🇸 English</a> · <a href="#中文">🇨🇳 中文</a>
 </p>
 
+## 0.4.1 - 2026-07-10
+
+### English
+
+#### Fixed
+
+- Browser Control centers the permission guide after the settings dialog enters, keeps the full spotlight visible, and returns to the top after authorization. Reduced-motion mode positions it immediately.
+- Activity group labels and colors follow the latest or terminal outcome. Recovered and completed groups use the success tone; failed steps remain visible in details.
+
+#### Changed
+
+- The Sources card uses one edge-to-edge hover surface with reversible motion and a subtle icon lift. Its popover opens directly into source items without a repeated heading.
+- Browser ref guidance, schemas, and runtime tests match the implemented lifecycle: refs survive snapshots and ordinary DOM updates while the same target stays visible and unchanged.
+
+#### Performance
+
+- AgentHost loads browser tools and provider-specific model runtimes when a task needs them, reducing the initial offscreen entry from 629 kB to 361 kB.
+- Release verification enforces a 500 kB initial-entry budget for AgentHost and the side panel.
+
+#### Documentation
+
+- README adds lossless product screenshots for the idle side panel, completed tasks, and site skills.
+
+### 中文
+
+#### 修复
+
+- 浏览器控制在设置弹窗进场后将权限引导完整移至可视区域中央，授权完成后回到顶部。减少动态效果模式会立即定位。
+- 活动组文案和颜色跟随最新步骤或整轮终态。恢复成功和已完成状态使用成功色，失败步骤仍保留在详情中。
+
+#### 变更
+
+- 来源卡片使用覆盖整张卡片的单一 hover 表面，并统一进出过渡与图标微动效。气泡直接展示来源条目，不再重复标题。
+- 浏览器 ref 文案、Schema 和运行时测试与实际生命周期对齐：同一目标保持可见且未变化时，ref 可跨快照和普通 DOM 更新继续使用。
+
+#### 性能
+
+- AgentHost 仅在任务需要时加载浏览器工具和对应供应商模型运行时，offscreen 初始入口由 629 kB 降至 361 kB。
+- 发布校验对 AgentHost 和侧边栏初始入口执行 500 kB 体积预算。
+
+#### 文档
+
+- README 增加空闲侧边栏、任务结果和站点技能的无损产品截图。
+
 ## 0.4.0 - 2026-07-10
 
 ### English
