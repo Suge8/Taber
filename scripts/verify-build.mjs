@@ -1,10 +1,12 @@
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 let extensionDirs = process.argv.slice(2);
 const expectDebugger = extensionDirs.includes('--debugger') || process.env.TABER_EXPECT_DEBUGGER === '1';
 extensionDirs = extensionDirs.filter((value) => value !== '--debugger');
 if (extensionDirs.length === 0) extensionDirs.push('.output/chrome-mv3', '.output/edge-mv3');
+
+const MAX_INITIAL_ENTRY_BYTES = 500_000;
 
 const requiredPermissions = [
   'storage',
@@ -49,7 +51,18 @@ async function verifyExtension(extensionDir) {
     await access(path.join(extensionDir, file));
   }
 
-  console.info(JSON.stringify({ extensionDir, hasDebugger: permissions.includes('debugger'), hasCookies: permissions.includes('cookies') }));
+  const agentHostEntryBytes = await entryScriptBytes(extensionDir, 'offscreen.html');
+  const sidepanelEntryBytes = await entryScriptBytes(extensionDir, 'sidepanel.html');
+  assert(agentHostEntryBytes <= MAX_INITIAL_ENTRY_BYTES, `${extensionDir}: AgentHost entry is ${agentHostEntryBytes} bytes; budget is ${MAX_INITIAL_ENTRY_BYTES}`);
+  assert(sidepanelEntryBytes <= MAX_INITIAL_ENTRY_BYTES, `${extensionDir}: sidepanel entry is ${sidepanelEntryBytes} bytes; budget is ${MAX_INITIAL_ENTRY_BYTES}`);
+  console.info(JSON.stringify({ extensionDir, hasDebugger: permissions.includes('debugger'), hasCookies: permissions.includes('cookies'), agentHostEntryBytes, sidepanelEntryBytes }));
+}
+
+async function entryScriptBytes(extensionDir, htmlFile) {
+  const html = await readFile(path.join(extensionDir, htmlFile), 'utf8');
+  const source = /<script\b[^>]*\bsrc="([^"]+\.js)"/.exec(html)?.[1];
+  assert(source, `${extensionDir}: ${htmlFile} entry script is missing`);
+  return (await stat(path.join(extensionDir, source.replace(/^\//, '')))).size;
 }
 
 function assert(condition, message) {
