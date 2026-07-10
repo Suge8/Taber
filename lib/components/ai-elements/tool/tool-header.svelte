@@ -22,7 +22,7 @@
 		type: ToolUIPartType;
 		state: ToolUIPartState;
 		labels?: Record<'pending' | 'running' | 'completed' | 'error', string> & Partial<Record<'warning', string>>;
-		icon?: Component<{ class?: string }>;
+		icon?: Component<{ class?: string; strokeWidth?: number }>;
 		iconClass?: string;
 		class?: string;
 		[key: string]: any;
@@ -71,8 +71,8 @@
 	{...restProps}
 >
 	<div class="flex min-w-0 items-center gap-2">
-		<span class="bg-surface-2/70 ring-line/50 flex size-6 shrink-0 items-center justify-center rounded-lg ring-1">
-			<ActionIcon class={cn("size-3", iconClass)} />
+		<span class="bg-surface-2/70 ring-line/50 flex size-8 shrink-0 items-center justify-center rounded-full shadow-[inset_0_1px_0_oklch(1_0_0_/_0.06)] ring-1">
+			<ActionIcon class={cn("size-5", iconClass)} strokeWidth={1.9} />
 		</span>
 		<span class="min-w-0 truncate text-[12px] font-medium leading-5">{type}</span>
 	</div>

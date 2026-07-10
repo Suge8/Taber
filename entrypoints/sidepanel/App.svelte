@@ -1,14 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { cubicOut, quintOut } from 'svelte/easing';
   import { browser } from 'wxt/browser';
   import { projectAgentEvents } from '$lib/agent-event-projection.ts';
-  import { createSession, initializeDatabase, listSessions, readLatestSessionSnapshot, readSessionSnapshot, type SessionListItem, type SessionSnapshot, type WorkspaceFile } from '$lib/db.ts';
+  import { createSession, initializeDatabase, listSessions, readLatestSessionSnapshot, readSessionSnapshot, type AgentEvent, type SessionListItem, type SessionSnapshot, type WorkspaceFile } from '$lib/db.ts';
   import { MAX_FILE_BYTES, deleteSessionFile, listSessionFiles, writeSessionFile } from '$lib/workspace-files.ts';
-  import { controlledTargetFromContext, imagePreviewFromProjection, settingsTabStartsBrowserControlGuide, shouldAdvanceToProviderSetup, sidebarTaskViewFromProjection, sourcesFromProjection, timelineFromProjection, type SettingsTab, type SourceLink } from '$lib/sidepanel-view.ts';
+  import { controlledTargetFromContext, imagePreviewFromProjection, mergeLiveAgentEvent, settingsTabStartsBrowserControlGuide, shouldAdvanceToProviderSetup, sidebarTaskViewFromProjection, sourcesFromProjection, timelineFromProjection, type SettingsTab, type SourceLink } from '$lib/sidepanel-view.ts';
   import { getReasoningEffort, getSelectedModelId, listProvidersWithModels, normalizeReasoningEffortForModel, setReasoningEffort, setSelectedModelId, type ProviderWithModels, type ReasoningEffort } from '$lib/provider-store.ts';
   import { detectLocale, localeManualStorageKey, localeStorageKey, messages, persistLocale, type Locale } from '$lib/sidepanel-i18n.ts';
-  import FadersHorizontal from 'phosphor-svelte/lib/FadersHorizontal';
-  import Sparkle from 'phosphor-svelte/lib/Sparkle';
+  import { buildSessionExportJsonl, sessionExportFileName } from '$lib/session-export.ts';
+  import { seedBuiltinSkills } from '$lib/skills-seeds.ts';
+  import { installIconDrawNormalizer } from '$lib/fx-icon-draw.ts';
+  import Settings2 from '@lucide/svelte/icons/settings-2';
+  import Sparkles from '@lucide/svelte/icons/sparkles';
   import { readBrowserControlState, type BrowserControlState } from './browser-access.ts';
   import SettingsDialog from './SettingsDialog.svelte';
   import SessionHistory from './SessionHistory.svelte';
@@ -29,6 +33,10 @@
 
   let snapshot = $state<SessionSnapshot | undefined>(undefined);
   let currentSessionId = $state<number | null>(null);
+  // Bumped only on explicit session switches to run the bidirectional view transition; untouched by streaming.
+  let sessionViewEpoch = $state(0);
+  let sessionRequestId = 0;
+  let sessionNavigationPending = false;
   let sessions = $state<SessionListItem[]>([]);
   let liveTaskState = $state<'idle' | 'running'>('idle');
   let providers = $state<ProviderWithModels[]>([]);
@@ -107,6 +115,7 @@
   });
 
   onMount(() => {
+    const uninstallIconDraw = installIconDrawNormalizer(document);
     const port = browser.runtime.connect({ name: 'taber.sidepanel' });
     void browser.windows.getCurrent().then((window) => {
       if (!window.id) return;
@@ -125,8 +134,13 @@
       if (message.type !== 'taber.agent.event') return;
       const event = isRecord(message.event) ? message.event : undefined;
       const eventSessionId = typeof event?.sessionId === 'number' ? event.sessionId : undefined;
-      if (eventSessionId === undefined || currentSessionId === null || currentSessionId === eventSessionId) void refreshSnapshot(eventSessionId);
-      void refreshSessions();
+      const relevant = eventSessionId === undefined || currentSessionId === null || currentSessionId === eventSessionId;
+      const taskBoundary = typeof event?.type !== 'string' || event.type.startsWith('task.');
+      // Task boundaries do a full re-read (heals missed broadcasts); everything
+      // else appends in place to avoid re-reading the session per delta.
+      if (relevant && taskBoundary) void refreshSnapshot(eventSessionId);
+      else if (relevant) appendLiveEvent(event, eventSessionId);
+      if (taskBoundary) void refreshSessions();
     };
     const syncLocale = () => { void refreshStoredLocale(); };
     const handleStorageChange = (changes: Record<string, { newValue?: unknown }>, areaName: string) => {
@@ -147,12 +161,18 @@
       port.disconnect();
       window.removeEventListener('storage', syncLocale);
       window.removeEventListener('taber.localechange', syncLocale);
+      uninstallIconDraw();
     };
   });
 
   async function boot() {
     try {
       await initializeDatabase();
+      // Seed builtin skills here too: the offscreen host only starts with the
+      // first task, but the skills panel is visible before that. Seeding must
+      // finish before databaseReady gates the UI open, or a fast first click on
+      // Skills reads an empty table (seeding failures still open the UI).
+      await seedBuiltinSkills().catch((error) => console.warn('Taber builtin skills seeding failed', error));
       databaseReady = true;
       await Promise.all([refreshProviders(), refreshBrowserControl(), refreshSessions(), refreshSnapshot()]);
     } catch (error) {
@@ -195,23 +215,69 @@
   }
 
   async function refreshSnapshot(sessionId?: number) {
+    if (sessionNavigationPending) return;
+    const requestId = sessionRequestId;
     try {
-      snapshot = sessionId ? await readSessionSnapshot(sessionId) : await readLatestSessionSnapshot();
-      currentSessionId = snapshot?.session.id ?? null;
-      liveTaskState = projectAgentEvents(snapshot?.agentEvents ?? []).taskState === 'running' ? 'running' : 'idle';
+      const nextSnapshot = sessionId ? await readSessionSnapshot(sessionId) : await readLatestSessionSnapshot();
+      if (requestId !== sessionRequestId) return;
+      applySnapshot(nextSnapshot);
     } catch (error) {
-      reportLoadError(error);
+      if (requestId === sessionRequestId) reportLoadError(error);
     }
   }
 
+  function applySnapshot(nextSnapshot: SessionSnapshot | undefined, transitionView = false) {
+    snapshot = nextSnapshot;
+    currentSessionId = nextSnapshot?.session.id ?? null;
+    liveTaskState = projectAgentEvents(nextSnapshot?.agentEvents ?? []).taskState === 'running' ? 'running' : 'idle';
+    if (transitionView) sessionViewEpoch += 1;
+  }
+
+  function appendLiveEvent(event: Record<string, unknown> | undefined, eventSessionId: number | undefined) {
+    const record = event as unknown as AgentEvent | undefined;
+    if (!record || typeof record.id !== 'number' || !snapshot || snapshot.session.id !== eventSessionId) {
+      void refreshSnapshot(eventSessionId);
+      return;
+    }
+    snapshot = { ...snapshot, agentEvents: mergeLiveAgentEvent(snapshot.agentEvents, record) };
+  }
+
   async function handleSelectSession(sessionId: number) {
-    await refreshSnapshot(sessionId);
+    if (sessionId === currentSessionId) return;
+    const requestId = ++sessionRequestId;
+    sessionNavigationPending = true;
+    try {
+      const nextSnapshot = await readSessionSnapshot(sessionId);
+      if (requestId !== sessionRequestId) return;
+      applySnapshot(nextSnapshot, true);
+    } catch (error) {
+      if (requestId === sessionRequestId) reportLoadError(error);
+    } finally {
+      if (requestId === sessionRequestId) sessionNavigationPending = false;
+    }
   }
 
   function handleNewSession() {
-    snapshot = undefined;
-    currentSessionId = null;
-    liveTaskState = 'idle';
+    if (snapshot === undefined) return; // already on a blank session
+    sessionRequestId += 1;
+    sessionNavigationPending = false;
+    applySnapshot(undefined, true);
+  }
+
+  async function handleExportSessionLog() {
+    const sessionId = currentSessionId;
+    if (sessionId === null) return;
+    try {
+      const events = (await readSessionSnapshot(sessionId)).agentEvents;
+      const url = URL.createObjectURL(new Blob([buildSessionExportJsonl(events)], { type: 'application/x-ndjson' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = sessionExportFileName(sessionId);
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      reportLoadError(error);
+    }
   }
 
   async function handleSelectModel(id: number) {
@@ -460,6 +526,24 @@
     void browser.runtime.sendMessage({ type: 'taber.background.openShortcutSettings' });
   }
 
+  function sessionViewIn(_node: Element) {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return {
+      duration: reduced ? 0 : 260,
+      easing: quintOut,
+      css: (progress: number, remaining: number) => `opacity:${progress};transform:translateY(${remaining * 10}px);filter:blur(${remaining * 3}px)`,
+    };
+  }
+
+  function sessionViewOut(_node: Element) {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return {
+      duration: reduced ? 0 : 150,
+      easing: cubicOut,
+      css: (progress: number, remaining: number) => `opacity:${progress};transform:translateY(${remaining * -5}px);filter:blur(${remaining * 2}px)`,
+    };
+  }
+
   function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object'; }
   function describe(error: unknown) { return error instanceof Error ? error.message : String(error); }
 
@@ -468,45 +552,56 @@
 <svelte:head><title>Taber</title></svelte:head>
 
 <main class="relative flex h-screen flex-col overflow-hidden bg-bg text-ink">
-  <div class="pointer-events-none fixed inset-x-0 top-0 z-20 flex items-center justify-between px-3 py-2.5">
+  <div class="pointer-events-none fixed inset-x-0 top-0 z-20 flex items-center justify-between px-3 py-3">
     <button
       type="button"
-      class="text-muted-foreground hover:text-foreground bg-surface/85 hover:bg-surface ring-line/70 pointer-events-auto flex size-8 items-center justify-center rounded-full ring-1 backdrop-blur transition-[background-color,color,transform] duration-150 ease-[var(--ease-out)] active:scale-[0.96]"
+      class="text-muted-foreground hover:text-foreground bg-surface/85 hover:bg-surface ring-line/70 pointer-events-auto flex size-10 items-center justify-center rounded-full shadow-[0_2px_10px_oklch(0_0_0_/_0.04)] ring-1 backdrop-blur transition-[background-color,color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:shadow-[0_4px_16px_oklch(0_0_0_/_0.07)] active:scale-[0.96]"
       aria-label={t.app.settings}
       onclick={() => openSettings('preferences')}
     >
-      <FadersHorizontal class="size-3.5" weight="duotone" />
+      <Settings2 class="fx-icon-draw size-[18px]" strokeWidth={1.9} />
     </button>
 
-    <div class="bg-surface/85 ring-line/70 pointer-events-auto rounded-full ring-1 backdrop-blur">
+    <div class="bg-surface/85 ring-line/70 pointer-events-auto rounded-full shadow-[0_2px_10px_oklch(0_0_0_/_0.04)] ring-1 backdrop-blur">
       <SessionHistory {locale} {sessions} {currentSessionId} onSelect={handleSelectSession} onNew={handleNewSession} />
     </div>
   </div>
 
   {#if databaseReady && setupMissing}
-    <section class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-7 overflow-hidden px-6 pt-12 text-center">
-      <span aria-hidden="true" class="taber-logo-image taber-logo-watermark fx-enter pointer-events-none block" style="--fx-index:0"></span>
+    <section class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-7 overflow-hidden px-6 pt-16 text-center">
+      <span aria-hidden="true" class="taber-logo-image taber-logo-watermark pointer-events-none block"></span>
       <div class="fx-enter space-y-1.5" style="--fx-index:1">
-        <h2 class="text-[15px] font-semibold tracking-tight text-foreground">{t.app.welcomeHeading}</h2>
+        <h2 class="text-[17px] font-semibold tracking-tight text-foreground">{t.app.welcomeHeading}</h2>
       </div>
       <button
         type="button"
-        class="fx-enter inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2.5 text-[12.5px] font-medium text-primary-foreground shadow-[0_1px_3px_oklch(0_0_0_/_0.08)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:bg-primary/90 active:scale-[0.97]"
+        class="fx-enter inline-flex items-center gap-2 rounded-full bg-primary px-5 py-3 text-[13.5px] font-medium text-primary-foreground shadow-[0_1px_3px_oklch(0_0_0_/_0.08)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:bg-primary/90 hover:shadow-[0_6px_18px_oklch(0_0_0_/_0.12)] active:scale-[0.97]"
         style="--fx-index:2"
         onclick={() => openSettings(missingBrowserControl ? 'preferences' : 'providers')}
       >
-        <Sparkle class="size-3.5" weight="fill" />
+        <Sparkles class="fx-icon-pop size-4" strokeWidth={2} />
         {t.app.getStarted}
       </button>
     </section>
   {:else if databaseReady}
-    <section class="min-h-0 flex-1 overflow-hidden pt-12">
-      <Timeline {locale} entries={timelineEntries} />
-    </section>
+    <div class="relative min-h-0 flex-1 overflow-hidden">
+      {#key sessionViewEpoch}
+        <div
+          data-session-view={currentSessionId ?? 'new'}
+          class="absolute inset-0 flex min-h-0 flex-col overflow-hidden"
+          in:sessionViewIn
+          out:sessionViewOut
+        >
+          <section class="min-h-0 flex-1 overflow-hidden pt-16">
+            <Timeline {locale} entries={timelineEntries} {notify} />
+          </section>
 
-    <SourcesBar {locale} {sources} target={controlledTarget} running={taskStatus === 'running'} {imagePreview} onOpenSource={openSource} onUseCurrentTab={useCurrentTabAsTarget} />
+          <SourcesBar {locale} {sources} target={controlledTarget} running={taskStatus === 'running'} {imagePreview} onOpenSource={openSource} onUseCurrentTab={useCurrentTabAsTarget} />
 
-    <FilesStrip {locale} files={sessionFiles} onDelete={handleDeleteFile} />
+          <FilesStrip {locale} files={sessionFiles} onDelete={handleDeleteFile} />
+        </div>
+      {/key}
+    </div>
 
     <section class="shrink-0 px-3 pb-3 pt-2">
       <Composer
@@ -519,7 +614,6 @@
         {selectedModelLabel}
         {missingModel}
         {reasoningEffort}
-        context={taskView.context}
         onSelectModel={handleSelectModel}
         onSelectReasoningEffort={handleSelectReasoningEffort}
         onMissingModel={() => openSettings('providers')}
@@ -544,6 +638,7 @@
   setTheme={setTheme}
   setLocale={setLocale}
   openShortcutSettings={openShortcutSettings}
+  onExportSessionLog={currentSessionId !== null ? handleExportSessionLog : undefined}
   refreshProviders={refreshProviders}
   refreshBrowserControl={refreshBrowserControl}
   onboarding={!hasAnyModel}

@@ -52,7 +52,7 @@ export type ProjectedAssistantTimelinePart =
 export type ProjectedAssistantTimelineTurn = {
   id: string;
   taskId?: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: number;
   updatedAt: number;
   parts: ProjectedAssistantTimelinePart[];
@@ -338,6 +338,7 @@ function createTaskAssistantTurn(group: ProjectedTaskGroup, tools: ProjectedTool
 function taskTurnStatus(group: ProjectedTaskGroup, tools: ProjectedToolRun[]): ProjectedAssistantTimelineTurn['status'] {
   if (group.status === 'running') return 'running';
   if (group.status === 'failed' || tools.some((tool) => tool.status === 'failed')) return 'failed';
+  if (group.status === 'cancelled') return 'cancelled';
   return 'completed';
 }
 

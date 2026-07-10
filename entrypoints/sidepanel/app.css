@@ -4,6 +4,12 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* DESIGN.md tokens. Single source of truth. */
+@property --fx-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
 :root {
   /* DESIGN palette (light) */
   --bg: oklch(0.985 0 0);
@@ -320,6 +326,86 @@
       filter: blur(1px);
     }
   }
+  /* Live activity card: twin light beams tracing the border — sharp 1px ring plus a blurred halo. */
+  .fx-beam {
+    position: relative;
+  }
+  .fx-beam::before,
+  .fx-beam::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from var(--fx-angle),
+      transparent 0turn 0.05turn,
+      color-mix(in oklch, var(--accent) 45%, transparent) 0.13turn,
+      color-mix(in oklch, var(--accent) 95%, transparent) 0.18turn,
+      transparent 0.25turn,
+      transparent 0.55turn,
+      color-mix(in oklch, var(--accent) 45%, transparent) 0.63turn,
+      color-mix(in oklch, var(--accent) 95%, transparent) 0.68turn,
+      transparent 0.75turn,
+      transparent 1turn
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: fxBeamSpin 3.6s linear infinite;
+    pointer-events: none;
+  }
+  .fx-beam::after {
+    filter: blur(6px);
+    opacity: 0.65;
+  }
+  @keyframes fxBeamSpin {
+    to { --fx-angle: 360deg; }
+  }
+  /* Slot-machine viewport: text emerges from fog at the edges. */
+  .fx-roll-mask {
+    mask-image: linear-gradient(to bottom, transparent 0%, black 32%, black 68%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 32%, black 68%, transparent 100%);
+  }
+  /* Card-hand fan for step chips: gentle arc, opens rightward on hover so it never escapes the card. */
+  .fx-fan {
+    transform: rotate(var(--fan-angle, 0deg)) translate(0, var(--fan-lift, 0px));
+    transform-origin: 50% 150%;
+    transition: transform 320ms var(--ease-out);
+  }
+  [data-activity-trigger]:hover .fx-fan {
+    transform: rotate(calc(var(--fan-angle, 0deg) * 1.4)) translate(var(--fan-shift, 0px), calc(var(--fan-lift, 0px) - 2px));
+  }
+  /* One-shot pulse when a new step lands. */
+  .fx-card-pulse {
+    animation: fxCardPulse 480ms var(--ease-enter);
+  }
+  @keyframes fxCardPulse {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.015); }
+    100% { transform: scale(1); }
+  }
+  /* Live activity label: gradient sweep across the text. */
+  .fx-shimmer-text {
+    background: linear-gradient(90deg, var(--muted) 0%, var(--ink) 45%, var(--ink) 55%, var(--muted) 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: fxShimmerText 2.2s linear infinite;
+  }
+  @keyframes fxShimmerText {
+    from { background-position: 130% 0; }
+    to { background-position: -130% 0; }
+  }
+  .fx-pop {
+    animation: fxPop 320ms var(--ease-enter);
+  }
+  @keyframes fxPop {
+    0% { transform: scale(1); }
+    45% { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
   .fx-tool-content {
     overflow: hidden;
     transform-origin: top;
@@ -354,6 +440,62 @@
       transform: translateY(-3px);
     }
   }
+  /* Icon hover motifs: one-shot replays, triggered by the hosting control's hover.
+     Draw repaints the stroke; strokes are normalized to pathLength=1 by
+     lib/fx-icon-draw.ts so all of them draw in sync regardless of geometry
+     (the [data-draw-ready] guard keeps un-normalized icons static). */
+  @media (hover: hover) {
+    :where(button, [role="button"], [data-slot="dropdown-menu-trigger"]):not(:disabled):hover .fx-icon-draw[data-draw-ready] {
+      animation: fxIconDrawFrame 950ms var(--ease-out);
+    }
+    :where(button, [role="button"], [data-slot="dropdown-menu-trigger"]):not(:disabled):hover .fx-icon-draw[data-draw-ready] :is(path, line, polyline, polygon, circle, rect, ellipse) {
+      animation: fxIconDraw 950ms var(--ease-out);
+    }
+    :where(button, [role="button"], [data-slot="dropdown-menu-trigger"]):not(:disabled):hover .fx-icon-wiggle {
+      animation: fxIconWiggle 520ms var(--ease-out);
+    }
+    :where(button, [role="button"], [data-slot="dropdown-menu-trigger"]):not(:disabled):hover .fx-icon-pop {
+      animation: fxIconPop 420ms var(--ease-enter);
+    }
+  }
+  /* pathLength=1 normalization: dash unit 1 == full stroke, every stroke draws in sync. */
+  @keyframes fxIconDraw {
+    from {
+      stroke-dasharray: 1 1;
+      stroke-dashoffset: 1;
+    }
+    to {
+      stroke-dasharray: 1 1;
+      stroke-dashoffset: 0;
+    }
+  }
+  /* Frame ride-along: the icon settles in while its stroke repaints. */
+  @keyframes fxIconDrawFrame {
+    0% {
+      scale: 0.9;
+      rotate: -6deg;
+      opacity: 0.75;
+    }
+    55% {
+      scale: 1.08;
+      rotate: 2.5deg;
+      opacity: 1;
+    }
+    100% {
+      scale: 1;
+      rotate: 0deg;
+      opacity: 1;
+    }
+  }
+  @keyframes fxIconWiggle {
+    0%, 100% { rotate: 0deg; scale: 1; }
+    30% { rotate: -10deg; scale: 1.1; }
+    65% { rotate: 7deg; scale: 1.04; }
+  }
+  @keyframes fxIconPop {
+    0%, 100% { scale: 1; rotate: 0deg; }
+    45% { scale: 1.2; rotate: -10deg; }
+  }
   .quick-action-summarize {
     --tw-ring-color: color-mix(in oklch, var(--accent) 26%, transparent);
     background: var(--accent);
@@ -375,18 +517,19 @@
   .composer-shell {
     position: relative;
     display: grid;
-    min-block-size: 5.75rem;
+    min-block-size: 7rem;
     overflow: hidden;
     isolation: isolate;
-    border-radius: 1.25rem;
+    border-radius: 1.5rem;
     background: var(--surface);
-    box-shadow: 0 8px 24px oklch(0 0 0 / 0.04);
+    box-shadow: 0 10px 30px oklch(0 0 0 / 0.05);
     transition-property: border-radius, background-color, box-shadow;
     transition-duration: 260ms;
     transition-timing-function: var(--ease-out);
   }
   .composer-shell:focus-within {
-    box-shadow: 0 12px 34px oklch(0 0 0 / 0.06);
+    --tw-ring-color: color-mix(in oklch, var(--accent) 30%, var(--line));
+    box-shadow: 0 14px 40px oklch(0 0 0 / 0.08);
   }
   .composer-shell::before {
     content: "";
@@ -505,16 +648,6 @@
     background-color: var(--surface);
     border-color: var(--permission-success-border);
   }
-  .permission-badge-granted {
-    background: var(--permission-success-badge);
-    border-color: var(--permission-success-border);
-    color: var(--permission-success-ink);
-  }
-  .permission-badge-complete {
-    background: transparent;
-    border-color: var(--permission-success-border);
-    color: var(--permission-success-ink);
-  }
   .taber-logo-image {
     background-image: url('/brand/taber-logo.png');
     background-position: center;
@@ -522,22 +655,43 @@
     background-size: contain;
   }
   .taber-logo-watermark {
-    block-size: clamp(12rem, 60vw, 14rem);
-    inline-size: clamp(12rem, 60vw, 14rem);
-    opacity: 0.1;
+    --logo-opacity: 0.18;
+    block-size: clamp(14rem, 72vw, 18rem);
+    inline-size: clamp(14rem, 72vw, 18rem);
+    opacity: var(--logo-opacity);
+    animation:
+      fxLogoIn 700ms var(--ease-enter) both,
+      fxLogoFloat 7s ease-in-out 700ms infinite;
+  }
+  @keyframes fxLogoIn {
+    from {
+      opacity: 0;
+      scale: 0.92;
+      filter: blur(8px);
+    }
+    to {
+      opacity: var(--logo-opacity);
+      scale: 1;
+      filter: blur(0);
+    }
+  }
+  /* transform (not translate) so it composes with Tailwind's translate utilities. */
+  @keyframes fxLogoFloat {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-9px) scale(1.02); }
   }
   [data-theme="dark"] .taber-logo-image {
     background-image: url('/brand/taber-logo-white.png');
   }
   [data-theme="dark"] .taber-logo-watermark {
-    opacity: 0.14;
+    --logo-opacity: 0.22;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .taber-logo-image {
       background-image: url('/brand/taber-logo-white.png');
     }
     :root:not([data-theme="light"]) .taber-logo-watermark {
-      opacity: 0.14;
+      --logo-opacity: 0.22;
     }
   }
   @keyframes fxLiquidDrift {

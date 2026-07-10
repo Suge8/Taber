@@ -227,7 +227,7 @@ export async function readSessionSnapshot(sessionId: number): Promise<SessionSna
   const session = await requireSession(sessionId);
   const [toolRuns, agentEvents] = await Promise.all([
     database.toolRuns.where('sessionId').equals(sessionId).sortBy('createdAt'),
-    database.agentEvents.where('sessionId').equals(sessionId).sortBy('createdAt'),
+    database.agentEvents.where('sessionId').equals(sessionId).sortBy('id'),
   ]);
 
   return { session, toolRuns, agentEvents };
