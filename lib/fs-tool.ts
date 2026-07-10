@@ -76,7 +76,9 @@ export function createFsController(options: { sessionId: number }) {
     };
   }
 
-  async function readSkill(fileName: string): Promise<FsResult> {
+  async function readSkill(rawFileName: string): Promise<FsResult> {
+    // Models occasionally append garbage tokens after the path; trim anything past ".md".
+    const fileName = rawFileName.replace(/(\.md).+$/, '$1');
     const skill = await findSkillByFileName(fileName);
     if (!skill) throw new Error(`Skill file not found: /skills/${fileName}. Use fs ls to see available files.`);
     const content = serializeSkillFile(skill);

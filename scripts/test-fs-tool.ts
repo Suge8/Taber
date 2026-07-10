@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import 'fake-indexeddb/auto';
 import { createSession, database, initializeDatabase } from '../lib/db.ts';
-import { createFsController, parseFsInput } from '../lib/fs-tool.ts';
+import { createFsController, MAX_FS_WRITE_CHARS, parseFsInput } from '../lib/fs-tool.ts';
 import { docxToText } from '../lib/document-export.ts';
 import { listSkills } from '../lib/skills.ts';
 import { listSessionFiles, readSessionFile, writeSessionFile } from '../lib/workspace-files.ts';
@@ -15,6 +15,8 @@ assert.deepEqual(parseFsInput({ action: 'ls' }), { action: 'ls' });
 assert.deepEqual(parseFsInput({ action: 'read', path: '/workspace/a.md' }), { action: 'read', path: '/workspace/a.md' });
 assert.throws(() => parseFsInput({ action: 'read' }), /requires path/);
 assert.throws(() => parseFsInput({ action: 'write', path: '/workspace/a.md' }), /requires content/);
+assert.equal(parseFsInput({ action: 'write', path: '/workspace/max.txt', content: 'x'.repeat(MAX_FS_WRITE_CHARS) }).content?.length, MAX_FS_WRITE_CHARS);
+assert.throws(() => parseFsInput({ action: 'write', path: '/workspace/too-large.txt', content: 'x'.repeat(MAX_FS_WRITE_CHARS + 1) }), /at most 200000 characters/);
 assert.throws(() => parseFsInput({ action: 'rm', path: '/workspace/a.md' }), /action must be one of/);
 
 // invalid paths
@@ -49,6 +51,9 @@ const skillWrite = await fs.run({ action: 'write', path: '/skills/hn-top-stories
 assert.equal(skillWrite.action === 'write' ? skillWrite.path : '', '/skills/hn-top-stories.md');
 const skillRead = await fs.run({ action: 'read', path: '/skills/hn-top-stories.md' });
 assert.match(skillRead.action === 'read' && 'content' in skillRead ? skillRead.content : '', /^---\nname: HN top stories/);
+// Garbage tokens after ".md" (model output noise) are trimmed instead of failing the read.
+const noisyRead = await fs.run({ action: 'read', path: '/skills/hn-top-stories.md}♀♀♀garbage tokens】【' });
+assert.equal(noisyRead.action === 'read' ? noisyRead.path : '', '/skills/hn-top-stories.md');
 await assert.rejects(fs.run({ action: 'write', path: '/skills/bad.txt', content: skillFile }), /must end with \.md/);
 await assert.rejects(fs.run({ action: 'write', path: '/skills/no-front.md', content: 'no frontmatter' }), /frontmatter/);
 
