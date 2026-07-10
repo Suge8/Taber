@@ -31,48 +31,63 @@ try {
   await pageCdp.send('Emulation.setLocaleOverride', { locale: 'en-US' }).catch(() => undefined);
   await installSendMessageStub(pageCdp);
 
-  await evaluate(pageCdp, clearDatabaseExpression());
-  await pageCdp.send('Page.reload', { ignoreCache: true });
-  const onboardingReport = await runOnboardingPhase(pageCdp);
+  if (process.env.TABER_SMOKE_PHASE === 'history') {
+    await evaluate(pageCdp, clearDatabaseExpression());
+    await evaluate(pageCdp, seedDatabaseExpression());
+    await evaluate(pageCdp, seedActivityStatusExpression());
+    await reloadSidepanel(pageCdp);
+    await waitForReady(pageCdp);
+    await pageCdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    const historyReport = await runHistoryPhase(pageCdp);
+    const activityStatusReport = await runActivityStatusPhase(pageCdp);
+    console.log(JSON.stringify({ sidePanelOpenAttempt, sidepanelUrl, history: historyReport, activityStatus: activityStatusReport }, null, 2));
+    assertAll('history', historyReport);
+    assertAll('activityStatus', activityStatusReport);
+  } else {
+    await evaluate(pageCdp, clearDatabaseExpression());
+    await reloadSidepanel(pageCdp);
+    const onboardingReport = await runOnboardingPhase(pageCdp);
 
-  await evaluate(pageCdp, clearDatabaseExpression());
-  await evaluate(pageCdp, seedDatabaseExpression({ browserControlReady: false }));
-  await pageCdp.send('Page.reload', { ignoreCache: true });
-  const browserControlExistingModelReport = await runBrowserControlExistingModelPhase(pageCdp);
+    await evaluate(pageCdp, clearDatabaseExpression());
+    await evaluate(pageCdp, seedDatabaseExpression({ browserControlReady: false }));
+    await reloadSidepanel(pageCdp);
+    const browserControlExistingModelReport = await runBrowserControlExistingModelPhase(pageCdp);
 
-  await evaluate(pageCdp, clearDatabaseExpression());
-  await evaluate(pageCdp, seedOpenAIApiProviderExpression());
-  await pageCdp.send('Page.reload', { ignoreCache: true });
-  const providerSettingsReport = await runProviderSettingsPhase(pageCdp);
+    await evaluate(pageCdp, clearDatabaseExpression());
+    await evaluate(pageCdp, seedOpenAIApiProviderExpression());
+    await reloadSidepanel(pageCdp);
+    const providerSettingsReport = await runProviderSettingsPhase(pageCdp);
 
-  await evaluate(pageCdp, clearDatabaseExpression());
-  await evaluate(pageCdp, seedDatabaseExpression());
-  await evaluate(pageCdp, seedTargetSwitchExpression());
-  await pageCdp.send('Page.reload', { ignoreCache: true });
-  const targetSwitchReport = await runTargetSwitchPhase(pageCdp);
+    await evaluate(pageCdp, clearDatabaseExpression());
+    await evaluate(pageCdp, seedDatabaseExpression());
+    await evaluate(pageCdp, seedTargetSwitchExpression());
+    await reloadSidepanel(pageCdp);
+    const targetSwitchReport = await runTargetSwitchPhase(pageCdp);
 
-  await evaluate(pageCdp, clearDatabaseExpression());
-  await evaluate(pageCdp, seedDatabaseExpression());
-  await pageCdp.send('Page.reload', { ignoreCache: true });
-  await waitForReady(pageCdp);
-  await evaluateStable(pageCdp, waitForTextExpression('Summarize this page'));
-  const idleSourcesReport = await runIdleSourcesPhase(pageCdp);
-  const recoveryReport = await evaluateStable(pageCdp, recoveryReportExpression());
-  const i18nReport = await runI18nPhase(pageCdp);
-  const historyReport = await runHistoryPhase(pageCdp);
-  const multiTurnReport = await runMultiTurnPhase(pageCdp);
+    await evaluate(pageCdp, clearDatabaseExpression());
+    await evaluate(pageCdp, seedDatabaseExpression());
+    await reloadSidepanel(pageCdp);
+    await waitForReady(pageCdp);
+    await evaluateStable(pageCdp, waitForTextExpression('Summarize this page'));
+    const idleSourcesReport = await runIdleSourcesPhase(pageCdp);
+    const recoveryReport = await evaluateStable(pageCdp, recoveryReportExpression());
+    const i18nReport = await runI18nPhase(pageCdp);
+    await pageCdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    const historyReport = await runHistoryPhase(pageCdp);
+    const multiTurnReport = await runMultiTurnPhase(pageCdp);
 
-  const output = { sidePanelOpenAttempt, sidepanelUrl, onboarding: onboardingReport, browserControlExistingModel: browserControlExistingModelReport, providerSettings: providerSettingsReport, targetSwitch: targetSwitchReport, idleSources: idleSourcesReport, recovery: recoveryReport, i18n: i18nReport, history: historyReport, multiTurn: multiTurnReport };
-  console.log(JSON.stringify(output, null, 2));
-  assertAll('onboarding', onboardingReport);
-  assertAll('browserControlExistingModel', browserControlExistingModelReport);
-  assertAll('providerSettings', providerSettingsReport);
-  assertAll('targetSwitch', targetSwitchReport);
-  assertAll('idleSources', idleSourcesReport);
-  assertAll('recovery', recoveryReport);
-  assertAll('i18n', i18nReport);
-  assertAll('history', historyReport);
-  assertAll('multiTurn', multiTurnReport);
+    const output = { sidePanelOpenAttempt, sidepanelUrl, onboarding: onboardingReport, browserControlExistingModel: browserControlExistingModelReport, providerSettings: providerSettingsReport, targetSwitch: targetSwitchReport, idleSources: idleSourcesReport, recovery: recoveryReport, i18n: i18nReport, history: historyReport, multiTurn: multiTurnReport };
+    console.log(JSON.stringify(output, null, 2));
+    assertAll('onboarding', onboardingReport);
+    assertAll('browserControlExistingModel', browserControlExistingModelReport);
+    assertAll('providerSettings', providerSettingsReport);
+    assertAll('targetSwitch', targetSwitchReport);
+    assertAll('idleSources', idleSourcesReport);
+    assertAll('recovery', recoveryReport);
+    assertAll('i18n', i18nReport);
+    assertAll('history', historyReport);
+    assertAll('multiTurn', multiTurnReport);
+  }
 } finally {
   pageCdp?.close();
   if (browserCdp && pageTarget) await browserCdp.send('Target.closeTarget', { targetId: pageTarget.targetId }).catch(() => undefined);
@@ -100,7 +115,7 @@ async function trySidePanelOpen() {
 async function runOnboardingPhase(cdp) {
   await evaluateStable(cdp, waitForTextExpression('Permissions'));
   const browserControlFirst = await evaluate(cdp, `(() => {
-    const text = document.body.innerText;
+    const text = document.body.textContent || '';
     return text.includes('Permissions') && text.includes('Website access') && text.includes('Allow User Scripts') && !document.querySelector('[data-smoke="add-api-provider"]');
   })()`);
 
@@ -126,7 +141,7 @@ async function runOnboardingPhase(cdp) {
   const onboardingVisible = await evaluate(cdp, `(() => Boolean(document.getElementById('onboarding-api-key') || document.getElementById('provider-api-key')))()`);
   await evaluate(cdp, fillOnboardingExpression({ apiKey: 'sk-smoke-TEST-1234' }));
   await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('button')].find((node) => node.textContent.includes('Load account models'));
+    const button = document.querySelector('button[aria-label="Load account models"]');
     if (!button) throw new Error('Load account models button not found');
     button.click();
     return true;
@@ -160,7 +175,7 @@ async function runOnboardingPhase(cdp) {
 async function runBrowserControlExistingModelPhase(cdp) {
   await evaluateStable(cdp, waitForTextExpression('Permissions'));
   const beforeDone = await evaluate(cdp, `(() => {
-    const text = document.body.innerText;
+    const text = document.body.textContent || '';
     return {
       existingModelStillSeesBrowserControl: text.includes('Permissions') && text.includes('Website access') && text.includes('Allow User Scripts'),
       providerOnboardingHidden: !document.querySelector('[data-smoke="add-api-provider"]') && !document.getElementById('onboarding-api-key'),
@@ -235,13 +250,19 @@ async function runProviderSettingsPhase(cdp) {
     button.click();
     return true;
   })()`);
-  await evaluateStable(cdp, waitForTextExpression('Load account models'));
+  await evaluateStable(cdp, `new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5000;
+    const timer = setInterval(() => {
+      if (document.querySelector('button[aria-label="Load account models"]')) { clearInterval(timer); resolve(true); return; }
+      if (Date.now() > deadline) { clearInterval(timer); reject(new Error('OpenAI provider edit controls did not render')); }
+    }, 50);
+  })`);
   return evaluate(cdp, `(() => {
     const visible = (node) => Boolean(node.offsetWidth || node.offsetHeight || node.getClientRects().length);
     const contextInputs = [...document.querySelectorAll('input[aria-label="Context"], input#provider-advanced-context, input#onboarding-provider-advanced-context')].filter(visible);
     const text = document.body.innerText;
     return {
-      openAIProviderEditOpen: text.includes('Load account models') && text.includes('gpt-unknown'),
+      openAIProviderEditOpen: Boolean(document.querySelector('button[aria-label="Load account models"]')) && text.includes('gpt-unknown'),
       openAIEditHasNoContextInput: contextInputs.length === 0,
     };
   })()`);
@@ -254,7 +275,7 @@ async function completeBrowserControl(cdp, next = 'main') {
     const timer = setInterval(() => {
       if (expected === 'provider' && document.body.innerText.includes('API provider')) { clearInterval(timer); resolve('ready'); return; }
       if (expected === 'main' && document.querySelector('textarea[name="message"]')) { clearInterval(timer); resolve('ready'); return; }
-      if (document.body.innerText.includes('Permissions')) { clearInterval(timer); resolve('permissions'); return; }
+      if (document.body.textContent?.includes('Permissions')) { clearInterval(timer); resolve('permissions'); return; }
       if (Date.now() > deadline) { clearInterval(timer); reject(new Error('browser control state did not appear: ' + document.body.innerText.slice(0, 300))); }
     }, 50);
   })`);
@@ -396,11 +417,19 @@ async function runI18nPhase(cdp) {
   })()`);
 
   await setLocaleInPage(cdp, 'zh');
-  await evaluateStable(cdp, waitForTextExpression('调试信息读取失败'));
+  await evaluateStable(cdp, `new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5000;
+    const timer = setInterval(() => {
+      const composer = document.querySelector('textarea[name="message"]');
+      const settings = document.querySelector('button[aria-label="设置"]');
+      if (composer?.placeholder.includes('让 Taber') && settings) { clearInterval(timer); resolve(true); return; }
+      if (Date.now() > deadline) { clearInterval(timer); reject(new Error('Chinese UI did not apply')); }
+    }, 50);
+  })`);
   const chineseReport = await evaluate(cdp, `(() => {
     const composer = document.querySelector('textarea[name="message"]');
     return {
-      switchedToChinese: document.body.innerText.includes('调试信息读取失败') && composer?.placeholder.includes('让 Taber'),
+      switchedToChinese: composer?.placeholder.includes('让 Taber') && Boolean(document.querySelector('button[aria-label="设置"]')),
       storedChinese: localStorage.getItem('taber.locale') === 'zh',
       agentTextUntranslated: document.body.innerText.includes('Summary ready.'),
       dataUntranslated: document.body.innerText.includes('demo-model') && document.body.innerText.includes('Summary ready.'),
@@ -451,6 +480,115 @@ async function runI18nPhase(cdp) {
 }
 
 async function runHistoryPhase(cdp) {
+  await openHistory(cdp);
+  const listReport = await evaluate(cdp, `(() => ({
+    listShowsOlder: document.body.innerText.includes('Older session'),
+    listShowsLatest: document.body.innerText.includes('Latest markdown session'),
+  }))()`);
+
+  const oldTransition = await selectHistoryItem(cdp, 'Older session', ['2', '1']);
+  await waitForSessionView(cdp, '1');
+
+  await evaluate(cdp, `(() => {
+    const style = document.createElement('style');
+    style.id = 'history-overflow-smoke';
+    style.textContent = '[data-smoke="session-history"] { max-height: 112px !important; }';
+    document.head.append(style);
+  })()`);
+  await openHistory(cdp);
+  const currentSessionPositioned = await evaluateStable(cdp, `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+    const content = document.querySelector('[data-smoke="session-history"]');
+    const actions = content?.querySelector('[data-history-actions]');
+    const current = content?.querySelector('[data-current-session]');
+    if (!content || !actions || !current) { resolve(false); return; }
+    const contentRect = content.getBoundingClientRect();
+    const actionsRect = actions.getBoundingClientRect();
+    const currentRect = current.getBoundingClientRect();
+    resolve(content.scrollTop > 0 && currentRect.top >= actionsRect.bottom - 3 && currentRect.bottom <= contentRect.bottom + 3);
+  })))`);
+  await evaluate(cdp, `document.getElementById('history-overflow-smoke')?.remove()`);
+  const newTransition = await selectHistoryItem(cdp, 'New session', ['1', 'new']);
+  await waitForSessionView(cdp, 'new');
+
+  await openHistory(cdp);
+  const returnTransition = await selectHistoryItem(cdp, 'Older session', ['new', '1']);
+  await waitForSessionView(cdp, '1');
+
+  await openHistory(cdp);
+  const rapidLatestThenNewKeepsNew = await selectHistoryThenNewRapidly(cdp);
+
+  await openHistory(cdp);
+  await selectHistoryItem(cdp, 'Older session', ['new', '1']);
+  await waitForSessionView(cdp, '1');
+
+  return evaluate(cdp, `(() => ({
+    ...${JSON.stringify(listReport)},
+    historyExitEnterOverlap: ${oldTransition},
+    currentSessionPositioned: ${currentSessionPositioned},
+    newSessionExitEnterOverlap: ${newTransition},
+    returnHistoryExitEnterOverlap: ${returnTransition},
+    rapidLatestThenNewKeepsNew: ${rapidLatestThenNewKeepsNew},
+    switchedToOldTimeline: document.body.innerText.includes('Old answer only.') && !document.body.innerText.includes('Summary ready.'),
+  }))()`);
+}
+
+async function runActivityStatusPhase(cdp) {
+  const cases = [
+    { title: 'Successful activity', from: '1', to: '3', expected: 'Completed 1 step' },
+    { title: 'Failed activity', from: '3', to: '4', expected: 'Failed after 1 step' },
+    { title: 'Stopped activity', from: '4', to: '5', expected: 'Stopped after 1 step' },
+    { title: 'Streaming text activity', from: '5', to: '6', expected: 'Completed 1 step' },
+  ];
+  const report = {};
+  for (const item of cases) {
+    await openHistory(cdp);
+    await selectHistoryItem(cdp, item.title, [item.from, item.to]);
+    await waitForSessionView(cdp, item.to);
+    report[item.to] = await evaluate(cdp, `document.body.innerText.includes(${JSON.stringify(item.expected)})`);
+  }
+  const streamingTextState = await evaluate(cdp, `(() => {
+    const group = document.querySelector('[data-activity-status]');
+    return group?.getAttribute('data-activity-status') === 'completed' && !group.classList.contains('fx-beam');
+  })()`);
+  const activityIconHoverScoped = await verifyActivityIconHoverScope(cdp);
+  return {
+    completedGroupSummary: report['3'],
+    failedGroupSummary: report['4'],
+    stoppedGroupSummary: report['5'],
+    streamingTextGroupCompleted: report['6'],
+    streamingTextGroupNoRunningEffect: streamingTextState,
+    activityIconHoverScoped,
+  };
+}
+
+async function verifyActivityIconHoverScope(cdp) {
+  const points = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector('[data-activity-trigger]');
+    const text = [...document.querySelectorAll('[data-role="assistant"] *')]
+      .find((element) => element.children.length === 0 && element.textContent.includes('Writing answer'));
+    if (!trigger || !text || !document.querySelector('.fx-fan')) return undefined;
+    const triggerRect = trigger.getBoundingClientRect();
+    const textRect = text.getBoundingClientRect();
+    return {
+      trigger: { x: triggerRect.left + triggerRect.width / 2, y: triggerRect.top + triggerRect.height / 2 },
+      text: { x: textRect.left + textRect.width / 2, y: textRect.top + textRect.height / 2 },
+    };
+  })()`);
+  if (!points) return false;
+
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+  await delay(360);
+  const baseTransform = await evaluate(cdp, `getComputedStyle(document.querySelector('.fx-fan')).transform`);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...points.text });
+  await delay(360);
+  const textTransform = await evaluate(cdp, `getComputedStyle(document.querySelector('.fx-fan')).transform`);
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...points.trigger });
+  await delay(360);
+  const triggerTransform = await evaluate(cdp, `getComputedStyle(document.querySelector('.fx-fan')).transform`);
+  return textTransform === baseTransform && triggerTransform !== baseTransform;
+}
+
+async function openHistory(cdp) {
   await evaluate(cdp, `(() => {
     const button = document.querySelector('button[aria-label="Session history"]');
     if (!button) throw new Error('history button not found');
@@ -462,29 +600,59 @@ async function runHistoryPhase(cdp) {
       const text = document.body.innerText;
       if (text.includes('Older session') && text.includes('Latest markdown session')) { clearInterval(timer); resolve(true); return; }
       if (Date.now() > deadline) { clearInterval(timer); reject(new Error('history list did not render: ' + text.slice(0, 400))); }
-    }, 50);
+    }, 20);
   })`);
-  const listReport = await evaluate(cdp, `(() => ({
-    listShowsOlder: document.body.innerText.includes('Older session'),
-    listShowsLatest: document.body.innerText.includes('Latest markdown session'),
-  }))()`);
-  await evaluate(cdp, `(() => {
-    const item = [...document.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent.includes('Older session'));
-    if (!item) throw new Error('older session item not found');
+}
+
+async function selectHistoryItem(cdp, label, expectedViews) {
+  return evaluate(cdp, `new Promise((resolve, reject) => {
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent.includes(${JSON.stringify(label)}));
+    if (!item) { reject(new Error('history item not found: ' + ${JSON.stringify(label)})); return; }
     item.click();
-  })()`);
-  await evaluateStable(cdp, `new Promise((resolve, reject) => {
+    const expected = ${JSON.stringify(expectedViews)};
     const deadline = Date.now() + 5000;
     const timer = setInterval(() => {
-      const text = document.body.innerText;
-      if (text.includes('Old answer only.') && !text.includes('Summary ready.')) { clearInterval(timer); resolve(true); return; }
-      if (Date.now() > deadline) { clearInterval(timer); reject(new Error('old session did not render: ' + text.slice(0, 400))); }
-    }, 50);
+      const views = [...document.querySelectorAll('[data-session-view]')].map((node) => node.getAttribute('data-session-view'));
+      if (expected.every((value) => views.includes(value))) { clearInterval(timer); resolve(true); return; }
+      if (Date.now() > deadline) { clearInterval(timer); reject(new Error('session transition did not overlap: ' + JSON.stringify({ label: ${JSON.stringify(label)}, expected, views }))); }
+    }, 10);
   })`);
-  return evaluate(cdp, `(() => ({
-    ...${JSON.stringify(listReport)},
-    switchedToOldTimeline: document.body.innerText.includes('Old answer only.') && !document.body.innerText.includes('Summary ready.'),
-  }))()`);
+}
+
+async function waitForSessionView(cdp, expected) {
+  return evaluateStable(cdp, `new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5000;
+    const timer = setInterval(() => {
+      const views = [...document.querySelectorAll('[data-session-view]')].map((node) => node.getAttribute('data-session-view'));
+      if (views.length === 1 && views[0] === ${JSON.stringify(expected)}) { clearInterval(timer); resolve(true); return; }
+      if (Date.now() > deadline) { clearInterval(timer); reject(new Error('session view did not settle: ' + JSON.stringify({ expected: ${JSON.stringify(expected)}, views }))); }
+    }, 20);
+  })`);
+}
+
+async function selectHistoryThenNewRapidly(cdp) {
+  await evaluate(cdp, `(() => {
+    const items = [...document.querySelectorAll('[role="menuitem"]')];
+    const latest = items.find((node) => node.textContent.includes('Latest markdown session'));
+    const fresh = items.find((node) => node.textContent.includes('New session'));
+    if (!latest || !fresh) throw new Error('rapid session switch items not found');
+    latest.click();
+    fresh.click();
+  })()`);
+  return evaluateStable(cdp, `new Promise((resolve, reject) => {
+    const deadline = performance.now() + 5000;
+    let stableSince;
+    const timer = setInterval(() => {
+      const views = [...document.querySelectorAll('[data-session-view]')].map((node) => node.getAttribute('data-session-view'));
+      if (views.length === 1 && views[0] === 'new') {
+        stableSince ??= performance.now();
+        if (performance.now() - stableSince >= 400) { clearInterval(timer); resolve(true); }
+        return;
+      }
+      stableSince = undefined;
+      if (performance.now() > deadline) { clearInterval(timer); reject(new Error('stale session request replaced latest selection: ' + JSON.stringify({ views }))); }
+    }, 20);
+  })`);
 }
 
 async function runMultiTurnPhase(cdp) {
@@ -572,15 +740,25 @@ async function waitForReady(cdp) {
 }
 
 async function pageReload(cdp) {
+  await reloadSidepanel(cdp);
+}
+
+async function reloadSidepanel(cdp) {
+  const loaded = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      stopListening();
+      reject(new Error('sidepanel reload timed out'));
+    }, 5000);
+    const stopListening = cdp.on('Page.loadEventFired', () => {
+      clearTimeout(timeout);
+      stopListening();
+      resolve(true);
+    });
+  });
   await cdp.send('Page.reload', { ignoreCache: true });
-  await delay(500);
-  await evaluateStable(cdp, `new Promise((resolve, reject) => {
-    const deadline = Date.now() + 5000;
-    const timer = setInterval(() => {
-      if (document.readyState === 'complete') { clearInterval(timer); resolve(true); return; }
-      if (Date.now() > deadline) { clearInterval(timer); reject(new Error('page did not reload')); }
-    }, 50);
-  })`);
+  await loaded;
+  await evaluateStable(cdp, installSendMessageStubExpression());
+  await evaluate(cdp, `window.dispatchEvent(new Event('focus'))`);
 }
 
 function waitForCapturedStartExpression(count) {
@@ -598,7 +776,7 @@ function waitForTextExpression(text) {
   return `new Promise((resolve, reject) => {
     const deadline = Date.now() + 5000;
     const timer = setInterval(() => {
-      if (document.readyState === 'complete' && document.body.innerText.includes(${JSON.stringify(text)})) {
+      if (document.body.textContent?.includes(${JSON.stringify(text)})) {
         clearInterval(timer); resolve(true); return;
       }
       if (Date.now() > deadline) { clearInterval(timer); reject(new Error('sidepanel did not render expected text (locale=' + localStorage.getItem('taber.locale') + '): ' + document.body.innerText.slice(0, 400))); }
@@ -641,7 +819,7 @@ function clearDatabaseExpression() {
       req.onerror = () => reject(req.error);
       req.onblocked = () => resolve(true);
     });
-    const open = indexedDB.open('taber', 1);
+    const open = indexedDB.open('taber');
     open.onupgradeneeded = () => createTaberStores(open.result);
     const db = await new Promise((resolve, reject) => { open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
     const stores = ['providers', 'providerCredentials', 'models', 'sessions', 'toolRuns', 'agentEvents', 'settings'].filter((store) => db.objectStoreNames.contains(store));
@@ -659,7 +837,7 @@ function seedOpenAIApiProviderExpression() {
   return `
 (async () => {
   localStorage.setItem('__taberSmokeAllSitesGranted', 'true');
-  const open = indexedDB.open('taber', 1);
+  const open = indexedDB.open('taber');
   const db = await new Promise((resolve, reject) => { open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
   const stores = ['providers', 'providerCredentials', 'models', 'sessions', 'agentEvents', 'settings'];
   await new Promise((resolve, reject) => {
@@ -685,7 +863,7 @@ function seedDatabaseExpression({ browserControlReady = true } = {}) {
   return `
 (async () => {
   localStorage.setItem('__taberSmokeAllSitesGranted', ${JSON.stringify(browserControlReady ? 'true' : 'false')});
-  const open = indexedDB.open('taber', 1);
+  const open = indexedDB.open('taber');
   open.onupgradeneeded = () => {
     const db = open.result;
     if (!db.objectStoreNames.contains('providers')) {
@@ -749,6 +927,38 @@ function seedDatabaseExpression({ browserControlReady = true } = {}) {
 })()`;
 }
 
+function seedActivityStatusExpression() {
+  return `new Promise((resolve, reject) => {
+    const open = indexedDB.open('taber');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const now = Date.now();
+      const tx = db.transaction(['sessions', 'agentEvents'], 'readwrite');
+      const sessions = tx.objectStore('sessions');
+      const events = tx.objectStore('agentEvents');
+      sessions.put({ id: 3, title: 'Successful activity', pinned: false, createdAt: now - 60000, updatedAt: now - 50000 });
+      sessions.put({ id: 4, title: 'Failed activity', pinned: false, createdAt: now - 70000, updatedAt: now - 60000 });
+      sessions.put({ id: 5, title: 'Stopped activity', pinned: false, createdAt: now - 80000, updatedAt: now - 70000 });
+      sessions.put({ id: 6, title: 'Streaming text activity', pinned: false, createdAt: now - 90000, updatedAt: now - 80000 });
+      events.put({ id: 30, sessionId: 3, type: 'task.started', payload: { taskId: 'success-status', prompt: 'success' }, createdAt: now - 59000 });
+      events.put({ id: 31, sessionId: 3, type: 'tool.completed', payload: { taskId: 'success-status', toolCallId: 'success-call', toolName: 'getDocument', output: { ok: true } }, createdAt: now - 58000 });
+      events.put({ id: 32, sessionId: 3, type: 'task.completed', payload: { taskId: 'success-status', text: '' }, createdAt: now - 57000 });
+      events.put({ id: 40, sessionId: 4, type: 'task.started', payload: { taskId: 'failed-status', prompt: 'fail' }, createdAt: now - 69000 });
+      events.put({ id: 41, sessionId: 4, type: 'tool.failed', payload: { taskId: 'failed-status', toolCallId: 'failed-call', toolName: 'navigate', error: 'boom' }, createdAt: now - 68000 });
+      events.put({ id: 42, sessionId: 4, type: 'task.failed', payload: { taskId: 'failed-status', error: 'boom' }, createdAt: now - 67000 });
+      events.put({ id: 50, sessionId: 5, type: 'task.started', payload: { taskId: 'stopped-status', prompt: 'stop' }, createdAt: now - 79000 });
+      events.put({ id: 51, sessionId: 5, type: 'tool.started', payload: { taskId: 'stopped-status', toolCallId: 'stopped-call', toolName: 'browserRepl', input: {} }, createdAt: now - 78000 });
+      events.put({ id: 52, sessionId: 5, type: 'task.cancelled', payload: { taskId: 'stopped-status' }, createdAt: now - 77000 });
+      events.put({ id: 60, sessionId: 6, type: 'task.started', payload: { taskId: 'streaming-text-status', prompt: 'stream' }, createdAt: now - 89000 });
+      events.put({ id: 61, sessionId: 6, type: 'tool.completed', payload: { taskId: 'streaming-text-status', toolCallId: 'streaming-call', toolName: 'getDocument', output: { ok: true } }, createdAt: now - 88000 });
+      events.put({ id: 62, sessionId: 6, type: 'message.appended', payload: { taskId: 'streaming-text-status', messageId: 'streaming-answer', role: 'assistant', delta: 'Writing answer…' }, createdAt: now - 87000 });
+      tx.oncomplete = () => { db.close(); resolve(true); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  })`;
+}
+
 function seedTargetSwitchExpression() {
   return `new Promise((resolve, reject) => {
     const open = indexedDB.open('taber');
@@ -798,35 +1008,40 @@ function installSendMessageStubExpression() {
         }
         return window.__taberSmokeOriginalFetch(input, init);
       };
-      if (chrome?.permissions) {
-        const originalContains = chrome.permissions.contains?.bind(chrome.permissions);
-        const originalRequest = chrome.permissions.request?.bind(chrome.permissions);
-        const originalRemove = chrome.permissions.remove?.bind(chrome.permissions);
-        chrome.permissions.contains = (input, callback) => {
+      const patchPermissions = (api) => {
+        if (!api?.permissions || api.permissions.__taberSidepanelSmoke) return;
+        const permissions = api.permissions;
+        const originalContains = permissions.contains?.bind(permissions);
+        const originalRequest = permissions.request?.bind(permissions);
+        const originalRemove = permissions.remove?.bind(permissions);
+        Object.defineProperty(permissions, 'contains', { configurable: true, value: (input, callback) => {
           if (isAllSitesRequest(input)) {
             const allowed = Boolean(window.__taberSmokeAllSitesGranted);
             if (callback) { callback(allowed); return; }
             return Promise.resolve(allowed);
           }
           return callback ? originalContains(input, callback) : originalContains(input);
-        };
-        chrome.permissions.request = (input, callback) => {
+        } });
+        Object.defineProperty(permissions, 'request', { configurable: true, value: (input, callback) => {
           if (isAllSitesRequest(input)) {
             window.__taberSmokeAllSitesGranted = true;
             if (callback) { callback(true); return; }
             return Promise.resolve(true);
           }
           return callback ? originalRequest(input, callback) : originalRequest(input);
-        };
-        chrome.permissions.remove = (input, callback) => {
+        } });
+        Object.defineProperty(permissions, 'remove', { configurable: true, value: (input, callback) => {
           if (isAllSitesRequest(input)) {
             window.__taberSmokeAllSitesGranted = false;
             if (callback) { callback(true); return; }
             return Promise.resolve(true);
           }
           return callback ? originalRemove(input, callback) : originalRemove(input);
-        };
-      }
+        } });
+        Object.defineProperty(permissions, '__taberSidepanelSmoke', { configurable: true, value: true });
+      };
+      patchPermissions(globalThis.chrome);
+      if (globalThis.browser !== globalThis.chrome) patchPermissions(globalThis.browser);
       if (!chrome.userScripts) chrome.userScripts = {};
       if (!chrome.userScripts.execute) chrome.userScripts.execute = () => Promise.resolve([]);
     } catch {}
@@ -913,8 +1128,8 @@ function recoveryReportExpression() {
     rendersList: Boolean(markdown?.querySelector('ul li')),
     rendersCodeBlock: Boolean(markdown?.querySelector('pre code')),
     stripsXss: window.__taberXss !== 1 && !html.includes('onerror=') && !markdown?.querySelector('img'),
-    showsToolName: text.includes('Read') && text.includes('Capture') && (text.includes('Debug') || text.includes('Could not read debug data')),
-    showsToolError: text.includes('Could not read debug data') || text.includes('Step failed'),
+    hasFailedActivity: Boolean(document.querySelector('[data-activity-status="failed"]')),
+    collapsedActivityHidesTechnicalError: !text.includes('Could not read debug data') && !text.includes('Step failed'),
     noTopRunningPill: !document.querySelector('[data-task-status]'),
     hidesReasoning: !text.includes('private reasoning') && !text.includes('secret-cot') && !text.includes('secret-reasoning') && !text.includes('unterminated-think') && !text.includes('unterminated-fence') && !text.includes('space-secret') && !text.includes('attr-secret') && !text.includes('newline-secret') && !text.includes('space-fence-secret') && !text.includes('cot-fence-secret') && !text.includes('raw-fence-secret') && !text.includes('nested-input-secret') && !text.includes('nested-output-secret') && !html.includes('secret-cot') && !html.includes('secret-reasoning') && !html.includes('unterminated-think') && !html.includes('unterminated-fence') && !html.includes('space-secret') && !html.includes('attr-secret') && !html.includes('newline-secret') && !html.includes('space-fence-secret') && !html.includes('cot-fence-secret') && !html.includes('raw-fence-secret') && !html.includes('nested-input-secret') && !html.includes('nested-output-secret'),
     keepsReasoningSummary: !text.includes('secret-reasoning') && !html.includes('secret-reasoning'),
