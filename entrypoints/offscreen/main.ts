@@ -1,5 +1,5 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { isLoopFinished, ToolLoopAgent } from 'ai';
+import { stepCountIs, ToolLoopAgent } from 'ai';
 import { browser } from 'wxt/browser';
 import { isOperableTab } from '../../lib/active-tab';
 import { browserPageScriptConsentKey } from '../../lib/browser-access';
@@ -44,6 +44,10 @@ let runningTask:
     }
   | undefined;
 let idleCloseTimer: ReturnType<typeof setTimeout> | undefined;
+
+const MAX_AGENT_STEPS = 20;
+const AGENT_STEP_TIMEOUT_MS = 5 * 60_000;
+const AGENT_TOTAL_TIMEOUT_MS = 30 * 60_000;
 
 void initializeDatabase()
   .then(async () => {
@@ -168,18 +172,31 @@ ${skillsDigest}` : instructionsByLocale[task.locale];
     if (compacted) events = (await readSessionSnapshot(task.sessionId)).agentEvents;
     const messages = deriveModelMessages(events, task.taskId);
     if (needsCompaction(events, task.taskId, budget) || estimateModelPromptTokens({ instructions, toolPromptText: runtime.toolPromptText, messages }) > contextLimit(runtime.modelRecord.contextWindowTokens)) throw new Error('Context is too large for the selected model. Choose a larger context model or start a new session.');
-    const result = await runtime.agent.stream({ messages, abortSignal: task.abortController.signal });
-    const messageId = crypto.randomUUID();
-    const text = await collectAgentResponseText(result, {
-      createMessage: () => emitAgentEvent(task.sessionId, 'message.created', { taskId: task.taskId, messageId, role: 'assistant', text: '' }),
-      appendText: (delta) => emitAgentEvent(task.sessionId, 'message.appended', { taskId: task.taskId, messageId, delta }),
-      startReasoning: ({ reasoningId }) => emitAgentEvent(task.sessionId, 'reasoning.started', { taskId: task.taskId, reasoningId }),
-      appendReasoning: ({ reasoningId, delta }) => emitAgentEvent(task.sessionId, 'reasoning.appended', { taskId: task.taskId, reasoningId, delta }),
-      completeReasoning: ({ reasoningId }) => emitAgentEvent(task.sessionId, 'reasoning.completed', { taskId: task.taskId, reasoningId }),
-      startToolInput: ({ toolCallId, toolName, title }) => emitAgentEvent(task.sessionId, 'tool.input.started', { taskId: task.taskId, toolCallId, toolName, title }),
-      appendToolInput: ({ toolCallId, delta }) => emitAgentEvent(task.sessionId, 'tool.input.appended', { taskId: task.taskId, toolCallId, delta }),
-      completeToolInput: ({ toolCallId, toolName, input, title }) => emitAgentEvent(task.sessionId, 'tool.input.completed', { taskId: task.taskId, toolCallId, toolName, input, title }),
+    const result = await runtime.agent.stream({
+      messages,
+      abortSignal: task.abortController.signal,
+      timeout: { stepMs: AGENT_STEP_TIMEOUT_MS, totalMs: AGENT_TOTAL_TIMEOUT_MS },
     });
+    const messageId = crypto.randomUUID();
+    const deltas = createDeltaCoalescer((type, payload) => emitAgentEvent(task.sessionId, type, payload));
+    const emitFlushed = async (type: string, payload: unknown) => {
+      await deltas.flush();
+      await emitAgentEvent(task.sessionId, type, payload);
+    };
+    const text = await collectAgentResponseText(result, {
+      createMessage: () => emitFlushed('message.created', { taskId: task.taskId, messageId, role: 'assistant', text: '' }),
+      appendText: (delta) => deltas.append('message.appended', messageId, { taskId: task.taskId, messageId }, delta),
+      startReasoning: ({ reasoningId }) => emitFlushed('reasoning.started', { taskId: task.taskId, reasoningId }),
+      appendReasoning: ({ reasoningId, delta }) => deltas.append('reasoning.appended', reasoningId, { taskId: task.taskId, reasoningId }, delta),
+      completeReasoning: ({ reasoningId }) => emitFlushed('reasoning.completed', { taskId: task.taskId, reasoningId }),
+      startToolInput: ({ toolCallId, toolName, title }) => emitFlushed('tool.input.started', { taskId: task.taskId, toolCallId, toolName, title }),
+      appendToolInput: ({ toolCallId, delta }) => deltas.append('tool.input.appended', toolCallId, { taskId: task.taskId, toolCallId }, delta),
+      completeToolInput: ({ toolCallId, toolName, input, title }) => emitFlushed('tool.input.completed', { taskId: task.taskId, toolCallId, toolName, input, title }),
+      failToolCall: ({ toolCallId, toolName, error }) => emitFlushed('tool.failed', { taskId: task.taskId, toolCallId, toolName, error }),
+    }, {
+      abortSignal: task.abortController.signal,
+      onHealthFailure: (error) => { void failRunningTask(task.taskId, error); },
+    }).finally(() => deltas.flush());
     if (task.abortController.signal.aborted) throw new Error('Task aborted');
     await emitAgentEvent(task.sessionId, 'task.completed', { taskId: task.taskId, text });
   } catch (error) {
@@ -236,7 +253,7 @@ async function createConfiguredRuntime(
     agent: new ToolLoopAgent({
       model,
       instructions,
-      stopWhen: isLoopFinished(),
+      stopWhen: stepCountIs(MAX_AGENT_STEPS),
       ...(providerOptions ? { providerOptions } : {}),
       tools: createAgentTools({
         sessionId,
