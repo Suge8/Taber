@@ -25,7 +25,7 @@ import { readFreshXaiTokens } from '../../lib/xai-provider';
 import { createXaiLanguageModel, xaiProviderOptions } from '../../lib/xai-runtime';
 import { readSelectedConfiguredModel } from '../../lib/provider-config-flow';
 import { getProviderApiKey, getReasoningEffort, reasoningProviderOptionsForModel } from '../../lib/provider-store';
-import { skillsDigestForUrl } from '../../lib/skills';
+import { skillsDigestForTask } from '../../lib/skills';
 import { seedBuiltinSkills } from '../../lib/skills-seeds';
 import { AGENT_INSTRUCTIONS_VERSION, instructionsByLocale, readAgentLocale, type AgentLocale } from '../../lib/agent-instructions';
 
@@ -149,7 +149,7 @@ async function runAgentTask(task: {
   locale: AgentLocale;
 }) {
   try {
-    const skillsDigest = await skillsDigestForUrl(task.targetTabUrl);
+    const skillsDigest = await skillsDigestForTask(task.targetTabUrl, task.prompt);
     const instructions = skillsDigest ? `${instructionsByLocale[task.locale]}
 
 ${skillsDigest}` : instructionsByLocale[task.locale];

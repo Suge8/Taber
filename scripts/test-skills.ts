@@ -15,7 +15,7 @@ import {
   serializeSkillFile,
   setSkillEnabled,
   skillFileName,
-  skillsDigestForUrl,
+  skillsDigestForTask,
 } from '../lib/skills.ts';
 
 await initializeDatabase();
@@ -61,12 +61,12 @@ assert.deepEqual(await matchSkillsForUrl('https://example.com'), []);
 await setSkillEnabled(exampleSkill.id, true);
 
 // digest + available paths
-const digest = await skillsDigestForUrl('https://github.com/pulls');
+const digest = await skillsDigestForTask('https://github.com/pulls', 'review my PRs');
 assert.match(digest, /## Site skills/);
 assert.match(digest, /- \/skills\/github-pr-review\.md: Updated/);
 assert.match(digest, /fs read/);
 assert.match(digest, /live page state always wins/);
-assert.equal(await skillsDigestForUrl('https://nomatch.dev'), '');
+assert.equal(await skillsDigestForTask('https://nomatch.dev', 'hello'), '');
 assert.deepEqual(await availableSkillPathsForUrl('https://example.com'), ['/skills/example-checkout.md']);
 
 // slug collisions are rejected: /skills paths must stay unique
@@ -113,7 +113,39 @@ console.log('test-skills passed');
   assert.equal(github.description, 'my custom notes');
   assert.equal(seeded.filter((skill) => skill.source === 'builtin').length, builtinSkillSeeds.length - 1);
   assert.deepEqual((await matchSkillsForUrl('https://zh.wikipedia.org/wiki/X')).map((skill) => skill.name), ['Wikipedia REST API']);
-  assert.match(await skillsDigestForUrl('https://news.ycombinator.com/'), /hacker-news-data-api\.md/);
+  assert.match(await skillsDigestForTask('https://news.ycombinator.com/', 'top stories'), /hacker-news-data-api\.md/);
+  // A prompt mentioning the site surfaces its skill even when the current tab is elsewhere.
+  assert.match(await skillsDigestForTask('https://www.google.com/search?q=x', '去tixbay 看看赵露思演唱会价格'), /tixbay-ticket-resale-api\.md/);
+  assert.equal(await skillsDigestForTask('https://nomatch.dev', '随便看看新闻'), '');
+}
+
+// Every builtin seed carries a category and zh localization for the skills panel.
+{
+  const { builtinSkillSeeds, builtinSkillDisplay } = await import('../lib/skills-seeds.ts');
+  const categories = new Set(['ticketing', 'shopping', 'social', 'video', 'travel', 'developer', 'reference']);
+  for (const seed of builtinSkillSeeds) {
+    assert.ok(categories.has(seed.category), `${seed.name} has invalid category ${seed.category}`);
+    assert.ok(seed.nameZh.trim().length > 0, `${seed.name} missing nameZh`);
+    assert.ok(seed.descriptionZh.trim().length > 0, `${seed.name} missing descriptionZh`);
+  }
+  assert.deepEqual(builtinSkillDisplay('tixbay ticket resale api')?.nameZh, 'Tixbay 票务转售 API');
+  assert.equal(builtinSkillDisplay('unknown skill'), undefined);
+  const seededCategory = (await listSkills()).find((skill) => skill.name === 'Tixbay ticket resale API');
+  assert.equal(seededCategory?.category, 'ticketing');
+}
+
+// The sidepanel must finish seeding before databaseReady gates the UI open;
+// otherwise a fast first click on Skills reads an empty table (false empty state).
+// Combined with the behavior check above (seed resolve ⇒ listSkills returns all
+// seeds), this pins the boot ordering: seeding completes before the panel opens.
+{
+  const { readFileSync } = await import('node:fs');
+  const appSource = readFileSync(new URL('../entrypoints/sidepanel/App.svelte', import.meta.url), 'utf8');
+  const seedIndex = appSource.indexOf('await seedBuiltinSkills()');
+  const readyIndex = appSource.indexOf('databaseReady = true');
+  assert.ok(seedIndex !== -1, 'App.svelte must await seedBuiltinSkills() during boot');
+  assert.ok(readyIndex !== -1, 'App.svelte must gate the UI with databaseReady');
+  assert.ok(seedIndex < readyIndex, 'App.svelte must finish seeding builtin skills before databaseReady opens the UI');
 }
 
 console.log('test-skills seeds passed');

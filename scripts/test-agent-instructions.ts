@@ -4,7 +4,7 @@ import { AGENT_INSTRUCTIONS_VERSION, instructionsByLocale } from '../lib/agent-i
 import { deriveModelMessages } from '../lib/model-context.ts';
 import type { AgentEvent } from '../lib/db.ts';
 
-assert.equal(AGENT_INSTRUCTIONS_VERSION, 5);
+assert.equal(AGENT_INSTRUCTIONS_VERSION, 9);
 assert.match(instructionsByLocale.zh, /## 权限层级/);
 assert.match(instructionsByLocale.zh, /## 自主执行/);
 assert.match(instructionsByLocale.zh, /## 安全边界/);
@@ -91,6 +91,23 @@ const evalFixtures: Array<{ name: string; assert(): void }> = [
       assert.match(instructions, /不保存密钥或个人数据|never store secrets or personal data/);
       assert.match(toolPrompt.fs.description, /priors, live page state wins/);
       assert.match(toolPrompt.fs.description, /Never store secrets/);
+    },
+  },
+  {
+    name: 'Skill persistence threshold is symmetric across locales (at least 4 exploratory tool calls)',
+    assert() {
+      // Prompt convention, not a code counter — these assertions pin the wording
+      // so the zh/en thresholds cannot drift apart again.
+      assert.match(instructionsByLocale.zh, /若本次任务花了至少 4 次探索性工具调用/);
+      assert.match(instructionsByLocale.en, /at least 4 exploratory tool calls/);
+      // No fabricated performance claims in production prompts.
+      assert.doesNotMatch(instructions, /十倍|10x/i);
+      assert.match(instructionsByLocale.zh, /结束回答前必须用 fs write/);
+      assert.match(instructionsByLocale.en, /you must fs write it as a \/skills file before finishing your answer/);
+      assert.match(instructionsByLocale.zh, /已有则更新/);
+      assert.match(instructionsByLocale.en, /update the existing skill if one exists/);
+      assert.match(instructionsByLocale.zh, /必须先 read 再操作/);
+      assert.match(instructionsByLocale.en, /read them before acting/);
     },
   },
   {

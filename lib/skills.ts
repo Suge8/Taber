@@ -1,4 +1,4 @@
-import { database, type Skill, type SkillSource } from './db.ts';
+import { database, type Skill, type SkillCategory, type SkillSource } from './db.ts';
 
 export const MAX_SKILL_CONTENT_CHARS = 8_000;
 export const MAX_SKILL_DESCRIPTION_CHARS = 300;
@@ -18,7 +18,27 @@ export async function matchSkillsForUrl(url: string | undefined): Promise<Skill[
   return skills.filter((skill) => skill.enabled && skill.hosts.some((skillHost) => hostMatches(host, skillHost)));
 }
 
-export async function saveSkill(record: { name: string; hosts: string[]; description: string; content: string; source: SkillSource }): Promise<Skill> {
+// Prompt mentions like "去 tixbay 看看…" should surface the site skill from the very
+// first turn, not only after navigation announces it. Short labels (jd, x) are
+// skipped to avoid false hits in ordinary words.
+const MIN_PROMPT_HOST_LABEL_CHARS = 4;
+
+export async function matchSkillsForTask(url: string | undefined, prompt: string): Promise<Skill[]> {
+  const matched = new Map((await matchSkillsForUrl(url)).map((skill) => [skill.id, skill]));
+  const promptText = prompt.toLowerCase();
+  for (const skill of await listSkills()) {
+    if (!skill.enabled || matched.has(skill.id)) continue;
+    if (skill.hosts.some((host) => promptMentionsHost(promptText, host))) matched.set(skill.id, skill);
+  }
+  return [...matched.values()];
+}
+
+function promptMentionsHost(promptText: string, host: string) {
+  const label = host.split('.')[0];
+  return label.length >= MIN_PROMPT_HOST_LABEL_CHARS && promptText.includes(label);
+}
+
+export async function saveSkill(record: { name: string; hosts: string[]; description: string; content: string; source: SkillSource; category?: SkillCategory }): Promise<Skill> {
   const name = requireText(record.name, 'name', MAX_SKILL_NAME_CHARS);
   const hosts = parseHosts(record.hosts);
   const description = requireText(record.description, 'description', MAX_SKILL_DESCRIPTION_CHARS);
@@ -33,12 +53,13 @@ export async function saveSkill(record: { name: string; hosts: string[]; descrip
     const collision = skills.find((skill) => skill.id !== existing?.id && skillFileName(skill) === fileName);
     if (collision) throw new Error(`Skill name conflict: "${name}" and "${collision.name}" both map to /skills/${fileName}. Use a different name.`);
     if (existing) {
-      const next: Skill = { ...existing, name, hosts, description, content, source: record.source, updatedAt: now };
+      // Agent/user rewrites keep the original grouping unless a new one is given.
+      const next: Skill = { ...existing, name, hosts, description, content, source: record.source, category: record.category ?? existing.category, updatedAt: now };
       await database.skills.put(next);
       return next;
     }
     if (skills.length >= MAX_SKILLS) throw new Error(`Skill limit reached (${MAX_SKILLS}). Delete unused skills before saving new ones.`);
-    const id = await database.skills.add({ name, hosts, description, content, source: record.source, enabled: true, createdAt: now, updatedAt: now } as Skill);
+    const id = await database.skills.add({ name, hosts, description, content, source: record.source, category: record.category, enabled: true, createdAt: now, updatedAt: now } as Skill);
     return (await database.skills.get(Number(id)))!;
   });
 }
@@ -92,8 +113,8 @@ export function parseSkillFile(markdown: string): { name: string; hosts: string[
   return { name, hosts, description, content };
 }
 
-export async function skillsDigestForUrl(url: string | undefined): Promise<string> {
-  const matched = await matchSkillsForUrl(url);
+export async function skillsDigestForTask(url: string | undefined, prompt: string): Promise<string> {
+  const matched = await matchSkillsForTask(url, prompt);
   if (matched.length === 0) return '';
   const lines = matched.map((skill) => `- /skills/${skillFileName(skill)}: ${skill.description}`);
   return [

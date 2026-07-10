@@ -72,6 +72,8 @@ export type Setting = {
 
 export type SkillSource = 'agent' | 'user' | 'builtin';
 
+export type SkillCategory = 'ticketing' | 'shopping' | 'social' | 'video' | 'travel' | 'developer' | 'reference';
+
 export type Skill = {
   id: number;
   name: string;
@@ -79,6 +81,8 @@ export type Skill = {
   description: string;
   content: string;
   source: SkillSource;
+  /** Grouping for the skills panel; skills without one are user/agent-authored ("custom"). */
+  category?: SkillCategory;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;

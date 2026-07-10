@@ -2,7 +2,7 @@
 
 日期：2026-07-09
 
-状态：已接受（推翻 plan.md 早期"暂不做 reusable site skills"）；工具形态已由 ADR 0016 修订：专用 `skills` 工具并入 `fs`，技能以 `/skills/*.md` frontmatter 文件暴露
+状态：已接受（推翻早期构建计划的"暂不做 reusable site skills"）；工具形态已由 ADR 0016 修订：专用 `skills` 工具并入 `fs`，技能以 `/skills/*.md` frontmatter 文件暴露；消费与沉淀细则已演进，见文末"后续修订"
 
 ## 背景
 
@@ -37,3 +37,14 @@ Taber 侧边栏原有 Skills 入口只是 UI 占位。
 - 顶层工具从 5 个变为 6 个（`getDocument/extractImage/navigate/browser/browserRepl/skills`）。
 - `AGENT_INSTRUCTIONS_VERSION` 升至 4：新增站点技能策略与"先明确完成标准"的目标锚点。
 - 技能内容进入模型上下文时属于用户拥有的指导性先验，非不可信页面数据；但沉淀时禁止写入敏感信息。
+
+## 后续修订（2026-07-10）
+
+以下细则取代决策 2/3/4 中的早期描述，以 `lib/skills.ts`、`lib/agent-tools.ts`、`lib/agent-instructions.ts` 为准：
+
+0. **工具形态**：决策 2 的独立 `skills` 工具（list/read/save）已由 ADR 0016 并入单一 `fs` 工具，技能以 `/skills/*.md` 文件暴露。
+1. **预匹配扩展**：任务开始除 target tab host 外，还从用户 prompt 预匹配站名（`matchSkillsForTask`，≥ 4 字符 label 防误命中）。
+2. **跨 host 提示面更宽**：`availableSkills` 附加在 `navigate`、`browser`、`browserRepl` 的跨 host 结果上，不限于 navigate。
+3. **读取从"Agent 决定"改为强制**：指令要求匹配到的技能必须先 read 再操作。
+4. **沉淀触发阈值**：任务花了至少 4 次探索性工具调用才找到关键路径时，结束前必须沉淀（prompt 约定，非代码计数；中英文阈值语义由 `scripts/test-agent-instructions.ts` 锁定）。
+5. **失效 nudge**：同一任务连续 2 次工具失败且读过技能时，错误信息附加一次性提示建议用 `fs write` 更新可能过期的技能（`StaleSkillTracker`）。
