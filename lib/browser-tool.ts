@@ -32,9 +32,9 @@ export type BrowserResult = {
   state?: unknown;
 };
 
-export const browserDescription = 'Structured page interaction with human-readable locators. Use for clicks, fills, keypresses, and reading page state. Actions: snapshot reads state and ignores target; click, fill, and press operate one target. Locators: prefer { text }, { role, name }, { label }, or { ref } from the latest snapshot; { selector } is fallback; { x, y } is the visual fallback for canvas/visual UIs where semantic locators fail — coordinates are viewport CSS px (state.viewport gives width/height; from a screenshot, scale pixel coords by viewport.width/imageWidth). Refs are opaque handles valid only until the next snapshot, page change, or DOM update. Actions auto-wait for DOM stability and return fresh state. Returns ok:false with code/message/candidates for ambiguous, stale, invisible, disabled, or non-fillable targets. Snapshot reports open shadow roots and frames[]; same-origin iframe content includes frames[].elements refs, cross-origin shows FRAME_NOT_ACCESSIBLE with hints.';
+export const browserDescription = 'Structured page interaction with human-readable locators. Use for clicks, fills, keypresses, and reading page state. Actions: snapshot reads state and ignores target; click, fill, and press operate one target. Locators: prefer { text }, { role, name }, { label }, or { ref } from browser state; { selector } is fallback; { x, y } is the visual fallback for canvas/visual UIs where semantic locators fail — coordinates are viewport CSS px (state.viewport gives width/height; from a screenshot, scale pixel coords by viewport.width/imageWidth). Refs are opaque handles that remain valid across snapshots and ordinary DOM updates while the same marked element stays visible and unchanged; page/frame changes, removal, replacement, or fingerprint changes make them stale. Actions auto-wait for DOM stability and return fresh state. Returns ok:false with code/message/candidates for ambiguous, stale, invisible, disabled, or non-fillable targets. Snapshot reports open shadow roots and frames[]; same-origin iframe content includes frames[].elements refs, cross-origin shows FRAME_NOT_ACCESSIBLE with hints.';
 
-const targetDescription = 'Exactly one PageTarget locator: { ref } from the latest browser state, { role, name }, { label }, { text }, { selector }, or { x, y } viewport CSS px. Prefer text/role/label/ref; selector is fallback; x/y is the last resort for visual-only targets.';
+const targetDescription = 'Exactly one PageTarget locator: { ref } from browser state, { role, name }, { label }, { text }, { selector }, or { x, y } viewport CSS px. Prefer text/role/label/ref; selector is fallback; x/y is the last resort for visual-only targets.';
 
 export const browserInputJsonSchema = {
   type: 'object',
@@ -47,7 +47,7 @@ export const browserInputJsonSchema = {
       additionalProperties: false,
       description: targetDescription,
       properties: {
-        ref: { type: 'string', description: 'Opaque ref string returned by the latest browser state; not a selector and not valid across new snapshots or page changes.' },
+        ref: { type: 'string', description: 'Opaque ref returned by browser state. It survives later snapshots and ordinary DOM updates while the same target remains visible and unchanged; it is not a selector.' },
         role: { type: 'string', description: 'Accessible or implicit role, for example button, link, tab, menuitem, textbox.' },
         name: { type: 'string', description: 'Accessible name paired with role.' },
         label: { type: 'string', description: 'Visible form label, placeholder, aria-label, name/id, or nearby field label.' },
@@ -104,7 +104,7 @@ function readPageTarget(value: unknown, name: string): PageTarget {
   const text = readFilledString(value.text);
   const selector = readFilledString(value.selector);
 
-  // A ref comes from the latest snapshot and is the most precise locator; models
+  // A ref comes from browser state and is the most precise locator; models
   // often echo the matching text/role alongside it. Prefer the ref outright:
   // stale refs come back as recoverable STALE_REF, so the feedback loop holds.
   if (ref) return { ref };

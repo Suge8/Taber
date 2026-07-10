@@ -159,7 +159,7 @@ async function testStructuredBrowserActionsUseSemanticLocators() {
   const snapshot = await runPageValue(page, { helper: 'browser', args: [{ action: 'snapshot' }] });
   const oldSnapshotRef = snapshot.state.elements.find((element: Record<string, unknown>) => element.name === '模型广场').ref;
   assertBrowserSnapshotShape(snapshot.state);
-  assert(snapshot.state.hints.some((hint: string) => hint.includes('Refs are scoped')));
+  assert(snapshot.state.hints.some((hint: string) => hint.includes('Refs remain valid')));
   await runPageValue(page, { helper: 'browser', args: [{ action: 'snapshot' }] });
   // A ref from an earlier snapshot keeps resolving while the element itself is unchanged.
   const refClick = await runPageValue(page, { helper: 'browser', args: [{ action: 'click', target: { ref: oldSnapshotRef } }] });

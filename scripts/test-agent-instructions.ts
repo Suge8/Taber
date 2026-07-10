@@ -56,7 +56,7 @@ const evalFixtures: Array<{ name: string; assert(): void }> = [
     name: 'Stale ref recovery requires fresh state',
     assert() {
       assert.match(instructions, /ambiguous\/stale → 从最新状态选择或换方法|For ambiguous\/stale: choose from fresh state or change method/);
-      assert.match(toolPrompt.browser.description, /Refs are opaque handles valid only until the next snapshot/);
+      assert.match(toolPrompt.browser.description, /remain valid across snapshots and ordinary DOM updates/);
       assert.match(toolPrompt.browser.description, /snapshot reads state and ignores target/);
     },
   },

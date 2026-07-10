@@ -84,7 +84,7 @@ const browserPrompt = prompt.browser;
 assert.match(browserPrompt.description, /human-readable locators/);
 assert.match(browserPrompt.description, /snapshot reads state and ignores target/);
 assert.match(browserPrompt.description, /\{ text \}.*\{ role, name \}.*\{ label \}.*\{ ref \}/);
-assert.match(browserPrompt.description, /latest snapshot/);
+assert.match(browserPrompt.description, /remain valid across snapshots and ordinary DOM updates/);
 assert.match(browserPrompt.description, /opaque handles/);
 assert.match(browserPrompt.description, /frames\[\]\.elements/);
 assert.match(browserPrompt.description, /FRAME_NOT_ACCESSIBLE/);

@@ -61,9 +61,8 @@ try {
   assertBrowserSnapshotShape(browserSnapshot.state);
   await assertScriptingCommandRoutesToFrame(extensionCdp, pageCdp, tabId);
   assert.equal((await runPageCommand(extensionCdp, tabId, { helper: 'browser', args: [{ action: 'click', target: { ref: browserSubmitRef } }] })).ok, true);
-  const staleBrowserRef = await runPageCommand(extensionCdp, tabId, { helper: 'browser', args: [{ action: 'click', target: { ref: browserSubmitRef } }] });
-  assert.equal(staleBrowserRef.ok, false);
-  assert.equal(staleBrowserRef.code, 'STALE_REF');
+  const reusedBrowserRef = await runPageCommand(extensionCdp, tabId, { helper: 'browser', args: [{ action: 'click', target: { ref: browserSubmitRef } }] });
+  assert.equal(reusedBrowserRef.ok, true, 'unchanged browser refs must survive ordinary page mutations');
 
   const browserJsAvailable = await verifyBrowserJs(extensionCdp, pageCdp, tabId);
   assert.equal(browserJsAvailable, true, 'browserjs runtime verification did not run; enable Allow User Scripts for Taber and retry');

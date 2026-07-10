@@ -106,7 +106,7 @@ export function installBrowserReplPageLocator() {
   }
   function pageBrowserElement(element: HTMLElement, number: number, store: BrowserSnapshotStore, confidence?: number) { return { ...pageBrowserSummaryElement(element, number), ref: pageSnapshotRef(store, element, number), ...(confidence !== undefined ? { confidence: pageRound(confidence) } : {}) }; }
   function pageBrowserSummaryElement(element: HTMLElement, number: number) { const rect = element.getBoundingClientRect(), href = pageHref(element), value = pageValueSummary(pageElementValue(element)); return { number, kind: pageElementKind(element), tag: element.tagName.toLowerCase(), role: pageElementRole(element), name: pageAccessibleName(element), text: pageShortText(element.innerText || element.textContent || ''), ...(href ? { href } : {}), ...(value ? { value } : {}), state: pageElementState(element, pageIsDisabled(element)), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } }; }
-  function pageBrowserHints(empty: boolean, runtimeContent: boolean) { return [...pageSenseHints(empty, runtimeContent), 'Refs are scoped to this snapshot; if the page changes, call browser.snapshot again and use a new ref.']; }
+  function pageBrowserHints(empty: boolean, runtimeContent: boolean) { return [...pageSenseHints(empty, runtimeContent), 'Refs remain valid while the same target stays visible and unchanged; take a new snapshot after navigation or a changed target.']; }
   function pageElementState(element: HTMLElement, disabled: unknown) {
     const state: Record<string, unknown> = {};
     if (disabled) state.disabled = true;
