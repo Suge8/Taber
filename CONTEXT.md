@@ -48,6 +48,10 @@ _Avoid_: 常驻后台 daemon、侧边栏 Agent、service worker Agent
 后台 service worker 中的浏览器 API 代理，代表 AgentHost 执行标签页、脚本注入和 userScripts 等扩展能力；`debugger` 只在显式 debug 构建中开放。
 _Avoid_: 在 AgentHost 中直接调用 Chrome API、重复 API bridge、上架版默认暴露高权限调试能力
 
+**前台操作模式**:
+用户在发送任务前选择的全局偏好，默认关闭并在任务启动时固定。开启后，Agent 操作页面前会激活 Chrome 内的目标标签页，方便观看；关闭后除视口截图的 Chrome 限制外保持后台执行。该模式从不主动聚焦操作系统中的 Chrome 窗口。
+_Avoid_: 运行中热切换、把标签激活等同于窗口聚焦、按动作维护前后台白名单、用模型参数控制标签激活
+
 **Agent 事件日志**:
 浏览器 Agent 运行过程的持久记录，包含消息、工具调用、工具结果和任务状态变化；侧边栏通过读取并订阅它恢复 UI。
 _Avoid_: UI 内存状态、仅实时事件

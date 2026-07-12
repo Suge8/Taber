@@ -98,3 +98,5 @@ pnpm run test:extension
 pnpm run test:browser-repl:runtime
 pnpm run test:sidepanel:smoke
 ```
+
+`test:sidepanel:smoke` 会清空并重建**测试扩展自身**的 IndexedDB 与站点权限。共享 launcher 会给本次 runtime 构建写入一次性标记；child smoke 在加载 App 前必须验证该标记，不匹配就硬失败。不要直接运行 `scripts/smoke-sidepanel-ui.mjs`，也不要把 sidepanel smoke 指向日常浏览器里的 Taber。

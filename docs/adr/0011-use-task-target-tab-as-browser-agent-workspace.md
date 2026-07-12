@@ -1,15 +1,15 @@
 # 任务级 target tab 是浏览器 Agent 工作区事实源
 
-状态：已接受；启动与不可操作页失效规则由 ADR 0018 修订。
+状态：已接受；启动与不可操作页失效规则由 ADR 0018 修订，标签激活规则由 ADR 0019 修订。
 
 Taber 在用户发消息启动任务时锁定工作区：background 使用侧边栏所属窗口当时的 active tab，不限制 URL，写入 `runningTask.targetTabId` 与 `task.started.payload.context`。打开侧边栏不锁定 tab，避免用户只是查看侧边栏就改变后续任务起点。
 
-运行中，`runningTask.targetTabId` 是唯一事实源。用户手动切换浏览器 active tab 不改变 Agent 工作区；`navigate.currentTab` 返回 target tab；`getDocument`、`extractImage`、`browser`、`browserRepl`、`debugger` 和 `navigate` 的非切换动作都默认操作 target tab。
+运行中，`runningTask.targetTabId` 是唯一页面事实源。用户手动切换浏览器 active tab 不改变 Agent 工作区；`navigate.currentTab` 返回 target tab；`getDocument`、`extractImage`、`browser`、`browserRepl`、`debugger` 和 `navigate` 的非切换动作都默认操作 target tab。是否先激活 target 只看任务启动时固定的 `foregroundMode`：关闭时后台执行，开启时页面工具和实际导航确保 target active；两种模式都不聚焦 Chrome 窗口。viewport 截图关闭时可临时激活并恢复，规则见 ADR 0019。
 
 允许切换 target 的入口只有三个：
 
-- `navigate.switchTab`：先确认旧 target 仍存在，再切换到目标可操作 tab。
-- `navigate.open target:"new"`：在旧 target 所属窗口打开新 tab，并把新 tab 设为 target。
+- `navigate.switchTab`：先确认旧 target 仍存在，再切换到目标可操作 tab；是否激活由任务模式决定。
+- `navigate.open target:"new"`：在旧 target 所属窗口打开新 tab，并把新 tab 设为 target；是否 active 由任务模式决定。
 - 侧边栏“改为当前 tab”：用户确认后，由 sidepanel 读取同窗口当前可操作 tab，发送 `taber.agent.switchTarget`。
 
 其他工具显式传入不同 `tabId` 必须失败，错误提示用户用 `navigate.switchTab` 切换工作区，不能跨 target 偷偷执行。

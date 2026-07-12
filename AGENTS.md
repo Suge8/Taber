@@ -23,15 +23,16 @@ Dexie               单一本地数据源，保存配置、会话、事件日志
 - 同一时间只运行一个全局 Agent 任务；AgentHost 有任务才创建，完成后保留 2 分钟空闲关闭
 - 侧边栏不是状态源；打开时从 Dexie 事件日志重建 UI
 - 任务启动时锁定侧边栏所属窗口的 active tab 为 target；非 http/https 也可启动，用户手动切 tab 不改 target，只有 `navigate.switchTab`、`navigate.open target:"new"` 或侧边栏确认才切换（ADR 0018）
+- 前台模式偏好保存在 Dexie，默认关闭并在任务启动时固定；开启只激活 Chrome 内的 target tab，关闭除 viewport 截图外后台执行，两种模式都不聚焦 Chrome 窗口（ADR 0019）
 - target tab 关闭或不存在时任务明确失败，不回退到其他 tab；target 暂时不可操作时仅页面工具失败，任务仍可导航恢复；除 `navigate.switchTab` 外，工具显式传入其他 `tabId` 必须失败
 - 上架版只申请必要权限，站点访问走 `optional_host_permissions`；`browserRepl` 不暴露裸 `chrome.*`
 
 ## 主要模块
 
-- 后台 broker 与扩展生命周期：`entrypoints/background.ts`、`lib/chrome-api-broker.ts`、`lib/offscreen-lifecycle.ts`、`lib/agent-host-controller.ts`
+- 后台 broker、前台模式与扩展生命周期：`entrypoints/background.ts`、`lib/foreground-mode.ts`、`lib/chrome-api-broker.ts`、`lib/offscreen-lifecycle.ts`、`lib/agent-host-controller.ts`
 - Offscreen AgentHost：`entrypoints/offscreen/main.ts`、`lib/agent-instructions.ts`、`lib/agent-tools.ts`
 - Agent 事件投影：`lib/agent-event-projection.ts`、`lib/agent-event-text.ts`、`lib/sidepanel-view.ts`、`lib/model-context.ts`
-- 站点技能与文件工作区：`lib/skills.ts`、`lib/skills-seeds.ts`、`lib/workspace-files.ts`、`lib/fs-tool.ts`、`lib/document-export.ts`、`docs/adr/0015`、0016、0017；target 规则见 ADR 0011、0018
+- 站点技能与文件工作区：`lib/skills.ts`、`lib/skills-seeds.ts`、`lib/workspace-files.ts`、`lib/fs-tool.ts`、`lib/document-export.ts`、`docs/adr/0015`、0016、0017；target 与激活规则见 ADR 0011、0018、0019
 - 固定工具：`lib/get-document.ts`、`lib/get-document-page.ts`、`lib/document-markdown.ts`、`lib/extract-image.ts`、`lib/navigate.ts`、`lib/browser-tool.ts`、`lib/browser-repl.ts`、`lib/browser-repl-command.ts`、`lib/browser-repl-executor.ts`、`lib/browser-repl-page.ts`、`lib/browser-repl-page-runtime.ts`、`lib/browser-repl-page-locator.ts`、`lib/browser-repl-page-introspection.ts`、`lib/browser-repl-code.ts`、`lib/browser-js-page-script.ts`、`lib/browser-repl-visual-page.ts`、`lib/debugger-tool.ts`
 - 侧边栏 UI：`entrypoints/sidepanel/App.svelte`、`entrypoints/sidepanel/SourcesBar.svelte`、`entrypoints/sidepanel/Timeline.svelte`、`entrypoints/sidepanel/ActivityGroup.svelte`、`lib/sidepanel-i18n.ts`、`lib/components/ai-elements/tool/tool-header.svelte`
 - 官方订阅 UI：`SubscriptionHub.svelte`、`SubscriptionLoginCard.svelte`、`OpenAILogo.svelte`、`GrokLogo.svelte`、`lib/subscription-login.ts`
