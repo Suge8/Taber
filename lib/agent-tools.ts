@@ -77,7 +77,7 @@ function browserReplDescription(browserJsEnabled: boolean) {
     'Advanced REPL for operations browser cannot express. ' +
     'Use only for batch actions, complex forms, debugging, or when browser fails. ' +
     'Single expressions return automatically; multi-statement code must return evidence. ' +
-    `Helpers: ${helpers}. All helpers are async. Result shapes: const { elements } = await observe() or query(css); const { text } = await readVisibleText(). Elements are serializable descriptors (name/value/index/selector), not DOM nodes. Pass the element object directly to actions: const {elements}=await query(css); await fill(elements[0], value); never pass a bare numeric index.${browserJsNote} ` +
+    `Helpers: ${helpers}. All helpers are async. Result shapes: const { elements } = await observe() or query(css); const { text } = await readVisibleText(); queryText("text") returns { count, matches, candidates }. Elements are serializable descriptors (name/value/index/selector), not DOM nodes. Pass the element object directly to actions: const {elements}=await query(css); await fill(elements[0], value); never pass a bare numeric index.${browserJsNote} ` +
     'Page reading: readVisibleText(), readLinksAndButtons(), listInteractiveElements(), queryText("text") cover main document, open shadow roots, and same-origin iframes; cross-origin frames show metadata. ' +
     'Element indexes from observe/query are scoped to one call; never reuse across calls. ' +
     'For page changes, use action auto-wait or waitFor; do not use sleep/setTimeout polling. ' +

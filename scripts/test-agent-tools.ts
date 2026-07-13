@@ -146,6 +146,8 @@ const replPrompt = prompt.browserRepl;
 const replDescription = replPrompt.description;
 assert.match(replDescription, /Advanced REPL for operations browser cannot express/);
 assert.match(replDescription, /Helpers: readVisibleText, readLinksAndButtons, listInteractiveElements, queryText/);
+assert.match(replDescription, /queryText\("text"\) returns \{ count, matches, candidates \}/);
+assert.match(replPrompt.inputSchema.properties.code.description, /queryText\("text"\) returns \{ count, matches, candidates \}/);
 assert.doesNotMatch(replDescription, /Helpers:[^.]*browserjs/);
 assert.match(replDescription, /Page reading: readVisibleText/);
 assert.match(replDescription, /Element indexes from observe\/query are scoped to one call/);
