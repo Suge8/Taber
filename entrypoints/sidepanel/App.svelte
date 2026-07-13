@@ -3,9 +3,10 @@
   import { cubicOut, quintOut } from 'svelte/easing';
   import { browser } from 'wxt/browser';
   import { projectAgentEvents } from '$lib/agent-event-projection.ts';
-  import { createSession, initializeDatabase, listSessions, readLatestSessionSnapshot, readSessionSnapshot, type AgentEvent, type SessionListItem, type SessionSnapshot, type WorkspaceFile } from '$lib/db.ts';
+  import { createSession, initializeDatabase, listSessions, readSelectedSessionSnapshot, readSessionSnapshot, selectSessionSnapshot, setSelectedSessionId, type AgentEvent, type SessionListItem, type SessionSnapshot, type WorkspaceFile } from '$lib/db.ts';
   import { MAX_FILE_BYTES, deleteSessionFile, listSessionFiles, writeSessionFile } from '$lib/workspace-files.ts';
   import { readForegroundMode, setForegroundMode } from '$lib/foreground-mode.ts';
+  import { profileConsentAfterStart, readPersonalProfile } from '$lib/personal-profile.ts';
   import { controlledTargetFromContext, imagePreviewFromProjection, mergeLiveAgentEvent, settingsTabStartsBrowserControlGuide, shouldAdvanceToProviderSetup, sidebarTaskViewFromProjection, sourcesFromProjection, timelineFromProjection, type SettingsTab, type SourceLink } from '$lib/sidepanel-view.ts';
   import { getReasoningEffort, getSelectedModelId, listProvidersWithModels, normalizeReasoningEffortForModel, setReasoningEffort, setSelectedModelId, type ProviderWithModels, type ReasoningEffort } from '$lib/provider-store.ts';
   import { detectLocale, localeManualStorageKey, localeStorageKey, messages, persistLocale, type Locale } from '$lib/sidepanel-i18n.ts';
@@ -38,6 +39,7 @@
   let sessionViewEpoch = $state(0);
   let sessionRequestId = 0;
   let sessionNavigationPending = false;
+  let sessionSelectionWrite = Promise.resolve();
   let sessions = $state<SessionListItem[]>([]);
   let liveTaskState = $state<'idle' | 'running'>('idle');
   let providers = $state<ProviderWithModels[]>([]);
@@ -46,6 +48,9 @@
   let reasoningEffort = $state<ReasoningEffort>('default');
   let foregroundMode = $state(false);
   let foregroundModeSave: Promise<void> | undefined;
+  // Single-task consent, never persisted: a successful task start consumes it (handleStart).
+  let profileAccess = $state(false);
+  let hasProfile = $state(false);
   let theme = $state<Theme>(readInitialTheme());
   let locale = $state<Locale>(detectRuntimeLocale());
   let settingsOpen = $state(false);
@@ -125,19 +130,11 @@
       sidepanelWindowId = window.id;
       port.postMessage({ type: 'taber.sidepanel.window', windowId: window.id });
     });
-    const handleSidepanelClose = (message: unknown) => {
-      if (isRecord(message) && message.type === 'taber.sidepanel.close') window.close();
-    };
     const handleMessage = (message: unknown) => {
-      if (!isRecord(message)) return;
-      if (message.type === 'taber.sidepanel.close') {
-        window.close();
-        return;
-      }
-      if (message.type !== 'taber.agent.event') return;
+      if (!isRecord(message) || message.type !== 'taber.agent.event') return;
       const event = isRecord(message.event) ? message.event : undefined;
       const eventSessionId = typeof event?.sessionId === 'number' ? event.sessionId : undefined;
-      const relevant = eventSessionId === undefined || currentSessionId === null || currentSessionId === eventSessionId;
+      const relevant = eventSessionId === undefined || currentSessionId === eventSessionId;
       const taskBoundary = typeof event?.type !== 'string' || event.type.startsWith('task.');
       // Task boundaries do a full re-read (heals missed broadcasts); everything
       // else appends in place to avoid re-reading the session per delta.
@@ -150,7 +147,6 @@
       if (areaName !== 'local') return;
       if (localeStorageKey in changes || localeManualStorageKey in changes) void refreshStoredLocale();
     };
-    port.onMessage.addListener(handleSidepanelClose);
     browser.runtime.onMessage.addListener(handleMessage);
     browser.storage.onChanged.addListener(handleStorageChange);
     window.addEventListener('storage', syncLocale);
@@ -158,7 +154,6 @@
     void refreshStoredLocale();
     void boot();
     return () => {
-      port.onMessage.removeListener(handleSidepanelClose);
       browser.runtime.onMessage.removeListener(handleMessage);
       browser.storage.onChanged.removeListener(handleStorageChange);
       port.disconnect();
@@ -177,6 +172,7 @@
       // Skills reads an empty table (seeding failures still open the UI).
       await seedBuiltinSkills().catch((error) => console.warn('Taber builtin skills seeding failed', error));
       foregroundMode = await readForegroundMode();
+      hasProfile = (await readPersonalProfile()).length > 0;
       databaseReady = true;
       await Promise.all([refreshProviders(), refreshBrowserControl(), refreshSessions(), refreshSnapshot()]);
     } catch (error) {
@@ -226,7 +222,7 @@
     if (sessionNavigationPending) return;
     const requestId = sessionRequestId;
     try {
-      const nextSnapshot = sessionId ? await readSessionSnapshot(sessionId) : await readLatestSessionSnapshot();
+      const nextSnapshot = sessionId ? await readSessionSnapshot(sessionId) : await readSelectedSessionSnapshot();
       if (requestId !== sessionRequestId) return;
       applySnapshot(nextSnapshot);
     } catch (error) {
@@ -250,13 +246,23 @@
     snapshot = { ...snapshot, agentEvents: mergeLiveAgentEvent(snapshot.agentEvents, record) };
   }
 
+  function sessionRequestIsCurrent(requestId: number, sessionId: number | null) {
+    return requestId === sessionRequestId && currentSessionId === sessionId;
+  }
+
+  function writeSessionSelection<T>(requestId: number, write: () => Promise<T>): Promise<T | undefined> {
+    const result = sessionSelectionWrite.then(() => requestId === sessionRequestId ? write() : undefined);
+    sessionSelectionWrite = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
   async function handleSelectSession(sessionId: number) {
     if (sessionId === currentSessionId) return;
     const requestId = ++sessionRequestId;
     sessionNavigationPending = true;
     try {
-      const nextSnapshot = await readSessionSnapshot(sessionId);
-      if (requestId !== sessionRequestId) return;
+      const nextSnapshot = await writeSessionSelection(requestId, () => selectSessionSnapshot(sessionId));
+      if (requestId !== sessionRequestId || !nextSnapshot) return;
       applySnapshot(nextSnapshot, true);
     } catch (error) {
       if (requestId === sessionRequestId) reportLoadError(error);
@@ -265,11 +271,19 @@
     }
   }
 
-  function handleNewSession() {
+  async function handleNewSession() {
     if (snapshot === undefined) return; // already on a blank session
-    sessionRequestId += 1;
-    sessionNavigationPending = false;
-    applySnapshot(undefined, true);
+    const requestId = ++sessionRequestId;
+    sessionNavigationPending = true;
+    try {
+      await writeSessionSelection(requestId, () => setSelectedSessionId(null));
+      if (requestId !== sessionRequestId) return;
+      applySnapshot(undefined, true);
+    } catch (error) {
+      if (requestId === sessionRequestId) reportLoadError(error);
+    } finally {
+      if (requestId === sessionRequestId) sessionNavigationPending = false;
+    }
   }
 
   async function handleExportSessionLog() {
@@ -313,6 +327,11 @@
     }
   }
 
+  async function refreshProfile() {
+    hasProfile = (await readPersonalProfile()).length > 0;
+    if (!hasProfile) profileAccess = false;
+  }
+
   async function handleForegroundModeChange(value: boolean) {
     if (value === foregroundMode || foregroundModeSave) return;
     const previous = foregroundMode;
@@ -334,6 +353,8 @@
   }
 
   async function handleStart(text: string) {
+    const startedSessionId = currentSessionId;
+    const requestId = startedSessionId === null ? ++sessionRequestId : sessionRequestId;
     await foregroundModeSave;
     if (missingModel) {
       openSettings('providers');
@@ -344,14 +365,20 @@
       return;
     }
     try {
-      const message = currentSessionId === null
-        ? { type: 'taber.background.startTask', prompt: text, foregroundMode, windowId: sidepanelWindowId, locale }
-        : { type: 'taber.background.startTask', prompt: text, foregroundMode, sessionId: currentSessionId, windowId: sidepanelWindowId, locale };
+      const message = startedSessionId === null
+        ? { type: 'taber.background.startTask', prompt: text, foregroundMode, profileAccess, windowId: sidepanelWindowId, locale }
+        : { type: 'taber.background.startTask', prompt: text, foregroundMode, profileAccess, sessionId: startedSessionId, windowId: sidepanelWindowId, locale };
       const response = await sendStartTask(message);
       if (isRecord(response) && typeof response.error === 'string') throw new Error(response.error);
-      liveTaskState = 'running';
+      profileAccess = profileConsentAfterStart(profileAccess, true);
       const sessionId = isRecord(response) && typeof response.sessionId === 'number' ? response.sessionId : undefined;
-      await Promise.all([refreshSessions(), refreshSnapshot(sessionId)]);
+      if (sessionId !== undefined && sessionRequestIsCurrent(requestId, startedSessionId)) {
+        const nextSnapshot = startedSessionId === null
+          ? await writeSessionSelection(requestId, () => selectSessionSnapshot(sessionId))
+          : await readSessionSnapshot(sessionId);
+        if (nextSnapshot && sessionRequestIsCurrent(requestId, startedSessionId)) applySnapshot(nextSnapshot);
+      }
+      await refreshSessions();
     } catch (error) {
       notifyProblem(error, 'error', 'task');
     }
@@ -359,13 +386,14 @@
 
   async function refreshSessionFiles(sessionId: number | null) {
     if (!databaseReady || sessionId === null) {
-      sessionFiles = [];
+      if (currentSessionId === sessionId) sessionFiles = [];
       return;
     }
     try {
-      sessionFiles = await listSessionFiles(sessionId);
+      const files = await listSessionFiles(sessionId);
+      if (currentSessionId === sessionId) sessionFiles = files;
     } catch {
-      sessionFiles = [];
+      if (currentSessionId === sessionId) sessionFiles = [];
     }
   }
 
@@ -374,14 +402,23 @@
       notify({ tone: 'info', icon: 'browser', text: t.quick.attachTooLarge });
       return undefined;
     }
+    const attachedSessionId = currentSessionId;
+    const requestId = attachedSessionId === null ? ++sessionRequestId : sessionRequestId;
     try {
-      if (currentSessionId === null) {
+      let sessionId = attachedSessionId;
+      if (sessionId === null) {
         const session = await createSession({ title: file.name.slice(0, 80) });
-        currentSessionId = session.id;
-        await refreshSessions();
+        const createdSessionId = session.id;
+        sessionId = createdSessionId;
+        if (sessionRequestIsCurrent(requestId, null)) {
+          const nextSnapshot = await writeSessionSelection(requestId, () => selectSessionSnapshot(createdSessionId));
+          if (nextSnapshot && sessionRequestIsCurrent(requestId, null)) applySnapshot(nextSnapshot);
+        }
       }
-      const saved = await writeSessionFile({ sessionId: currentSessionId, name: file.name, data: await file.arrayBuffer() });
-      await refreshSessionFiles(currentSessionId);
+      const saved = await writeSessionFile({ sessionId, name: file.name, data: await file.arrayBuffer() });
+      await refreshSessions();
+      if (!sessionRequestIsCurrent(requestId, sessionId)) return undefined;
+      await refreshSessionFiles(sessionId);
       return saved.name;
     } catch (error) {
       notifyProblem(error, 'error', 'task');
@@ -644,9 +681,13 @@
         {missingModel}
         {reasoningEffort}
         {foregroundMode}
+        {profileAccess}
+        {hasProfile}
         onSelectModel={handleSelectModel}
         onSelectReasoningEffort={handleSelectReasoningEffort}
         onForegroundModeChange={handleForegroundModeChange}
+        onProfileAccessChange={(value) => (profileAccess = value)}
+        onEditProfile={() => openSettings('preferences')}
         onMissingModel={() => openSettings('providers')}
         onSubmit={handleStart}
         onStop={handleStop}
@@ -672,6 +713,7 @@
   onExportSessionLog={currentSessionId !== null ? handleExportSessionLog : undefined}
   refreshProviders={refreshProviders}
   onBrowserControlChanged={applyBrowserControlState}
+  onProfileChanged={() => void refreshProfile()}
   onboarding={!hasAnyModel}
   spotlight={missingBrowserControl}
   providerSpotlight={providerSetupSpotlight}

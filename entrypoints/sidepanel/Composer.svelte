@@ -35,6 +35,7 @@
   import EyeOff from '@lucide/svelte/icons/eye-off';
   import CaretDown from '@lucide/svelte/icons/chevron-down';
   import GlobeSimple from '@lucide/svelte/icons/globe';
+  import IdCard from '@lucide/svelte/icons/id-card';
   import MousePointerClick from '@lucide/svelte/icons/mouse-pointer-click';
   import Paperclip from '@lucide/svelte/icons/paperclip';
   import Rocket from '@lucide/svelte/icons/rocket';
@@ -59,9 +60,13 @@
     missingModel: boolean;
     reasoningEffort: ReasoningEffort;
     foregroundMode: boolean;
+    profileAccess: boolean;
+    hasProfile: boolean;
     onSelectModel: (id: number) => void | Promise<void>;
     onSelectReasoningEffort: (value: ReasoningEffort) => void | Promise<void>;
     onForegroundModeChange: (value: boolean) => void | Promise<void>;
+    onProfileAccessChange: (value: boolean) => void;
+    onEditProfile: () => void;
     onMissingModel: () => void;
     onSubmit: (text: string) => void | Promise<void>;
     onStop: () => void | Promise<void>;
@@ -81,9 +86,13 @@
     missingModel,
     reasoningEffort,
     foregroundMode,
+    profileAccess,
+    hasProfile,
     onSelectModel,
     onSelectReasoningEffort,
     onForegroundModeChange,
+    onProfileAccessChange,
+    onEditProfile,
     onMissingModel,
     onSubmit,
     onStop,
@@ -97,6 +106,7 @@
   let p = $derived(messages[locale].prompts);
   let providerText = $derived(messages[locale].provider);
   let foregroundModeTooltip = $derived(foregroundMode ? t.foregroundModeOn : t.foregroundModeOff);
+  let profileTooltip = $derived(!hasProfile ? t.profileMissing : profileAccess ? t.profileOn : t.profileOff);
   let status = $derived<ChatStatus>(running ? 'streaming' : 'ready');
   let draft = $state('');
   let activeIntent = $state<IntentQuickActionMode | null>(null);
@@ -106,9 +116,7 @@
   let tabsVisible = $state(false);
   let modelPickerOpen = $state(false);
   let reasoningPickerOpen = $state(false);
-  let foregroundTooltipOpen = $state(false);
-  let foregroundTooltipLeft = $state(0);
-  let foregroundTooltipTop = $state(0);
+  let modeTooltip = $state<{ id: 'foreground' | 'profile'; left: number; top: number } | undefined>(undefined);
   let foregroundModeMotion = $state<'on' | 'off' | undefined>(undefined);
   let previousForegroundMode: boolean | undefined;
   let skillsOpen = $state(false);
@@ -118,7 +126,8 @@
   let tabsLoadToken = 0;
 
   const icons = { summarize: Summary, research: Search, skills: BookOpen, compare: Scale } as const;
-  const foregroundTooltipId = 'foreground-mode-tooltip';
+  const modeTooltipId = 'composer-mode-tooltip';
+  const modeTooltipText = $derived(modeTooltip?.id === 'profile' ? profileTooltip : foregroundModeTooltip);
 
   const microSlide = { duration: 160, easing: cubicOut };
   const baseSlide = { duration: 180, easing: cubicOut };
@@ -319,22 +328,32 @@
     return reasoningOptions.find((item) => item.value === value)?.label ?? t.reasoningDefault;
   }
 
-  function showForegroundTooltip(event: Event) {
+  function showModeTooltip(event: Event, id: 'foreground' | 'profile') {
     const rect = (event.currentTarget as HTMLButtonElement).getBoundingClientRect();
     const halfWidth = Math.min(136, (window.innerWidth - 32) / 2);
-    foregroundTooltipLeft = Math.min(window.innerWidth - halfWidth, Math.max(halfWidth, rect.left + rect.width / 2));
-    foregroundTooltipTop = rect.top - 8;
-    foregroundTooltipOpen = true;
+    modeTooltip = {
+      id,
+      left: Math.min(window.innerWidth - halfWidth, Math.max(halfWidth, rect.left + rect.width / 2)),
+      top: rect.top - 8,
+    };
   }
 
-  function hideForegroundTooltip() {
-    foregroundTooltipOpen = false;
+  function hideModeTooltip() {
+    modeTooltip = undefined;
   }
 
-  function handleForegroundTooltipKey(event: KeyboardEvent) {
+  function handleModeTooltipKey(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
-    foregroundTooltipOpen = false;
+    modeTooltip = undefined;
     event.stopPropagation();
+  }
+
+  function handleProfileClick() {
+    if (!hasProfile) {
+      onEditProfile();
+      return;
+    }
+    onProfileAccessChange(!profileAccess);
   }
 
   function providerLabel(provider: ProviderWithModels) {
@@ -613,19 +632,36 @@
               class="fx-mode-trigger relative flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-transparent text-muted-foreground ring-1 ring-transparent disabled:pointer-events-none disabled:opacity-45 hover:bg-surface-2 hover:text-foreground hover:ring-line/70 hover:shadow-[0_4px_12px_oklch(0_0_0_/_0.055)]"
               aria-label={t.foregroundMode}
               aria-pressed={foregroundMode}
-              aria-describedby={foregroundTooltipOpen ? foregroundTooltipId : undefined}
+              aria-describedby={modeTooltip?.id === 'foreground' ? modeTooltipId : undefined}
               disabled={disabled || running}
-              onpointerenter={showForegroundTooltip}
-              onpointerleave={hideForegroundTooltip}
-              onfocus={showForegroundTooltip}
-              onblur={hideForegroundTooltip}
-              onkeydown={handleForegroundTooltipKey}
+              onpointerenter={(event) => showModeTooltip(event, 'foreground')}
+              onpointerleave={hideModeTooltip}
+              onfocus={(event) => showModeTooltip(event, 'foreground')}
+              onblur={hideModeTooltip}
+              onkeydown={handleModeTooltipKey}
               onclick={() => void onForegroundModeChange(!foregroundMode)}
             >
               <span class="relative size-4" aria-hidden="true">
                 <Eye class="fx-icon-draw fx-mode-icon {foregroundMode ? 'is-active' : ''}" strokeWidth={1.9} />
                 <EyeOff class="fx-icon-draw fx-mode-icon {!foregroundMode ? 'is-active' : ''}" strokeWidth={1.9} />
               </span>
+            </button>
+
+            <button
+              type="button"
+              class="relative flex size-8 shrink-0 items-center justify-center rounded-[10px] ring-1 transition-[background-color,color,box-shadow,transform] duration-150 ease-[var(--ease-out)] active:scale-[0.96] disabled:pointer-events-none disabled:opacity-45 {profileAccess ? 'bg-primary/12 text-primary ring-primary/25' : 'bg-transparent text-muted-foreground ring-transparent hover:bg-surface-2 hover:text-foreground hover:ring-line/70 hover:shadow-[0_4px_12px_oklch(0_0_0_/_0.055)]'}"
+              aria-label={t.profileAccess}
+              aria-pressed={profileAccess}
+              aria-describedby={modeTooltip?.id === 'profile' ? modeTooltipId : undefined}
+              disabled={disabled || running}
+              onpointerenter={(event) => showModeTooltip(event, 'profile')}
+              onpointerleave={hideModeTooltip}
+              onfocus={(event) => showModeTooltip(event, 'profile')}
+              onblur={hideModeTooltip}
+              onkeydown={handleModeTooltipKey}
+              onclick={handleProfileClick}
+            >
+              <IdCard class="fx-icon-draw size-4" strokeWidth={1.9} />
             </button>
           </div>
         {/if}
@@ -663,22 +699,22 @@
   </section>
 </div>
 
-{#if foregroundTooltipOpen}
+{#if modeTooltip}
   <div
     class="pointer-events-none fixed z-[80]"
-    style:left="{foregroundTooltipLeft}px"
-    style:top="{foregroundTooltipTop}px"
+    style:left="{modeTooltip.left}px"
+    style:top="{modeTooltip.top}px"
     style:transform="translate(-50%, -100%)"
   >
     <div
-      id={foregroundTooltipId}
+      id={modeTooltipId}
       role="tooltip"
       data-slot="tooltip-content"
       data-state="instant-open"
       data-open
       class="fx-popover-content max-w-[min(17rem,calc(100vw-2rem))] rounded-lg bg-surface px-2.5 py-1.5 text-center text-[11.5px] leading-snug text-foreground shadow-[0_5px_16px_oklch(0_0_0_/_0.07)] ring-1 ring-line/70"
     >
-      {foregroundModeTooltip}
+      {modeTooltipText}
     </div>
   </div>
 {/if}

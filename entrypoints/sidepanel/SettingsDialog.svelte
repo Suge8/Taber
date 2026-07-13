@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { browser } from 'wxt/browser';
   import * as Dialog from '$lib/components/ui/dialog/index.js';
   import ArrowSquareOut from '@lucide/svelte/icons/external-link';
   import Database from '@lucide/svelte/icons/database';
@@ -10,6 +11,7 @@
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import Sun from '@lucide/svelte/icons/sun';
   import BrowserAccessPanel from './BrowserAccessPanel.svelte';
+  import ProfilePanel from './ProfilePanel.svelte';
   import type { BrowserControlState } from './browser-access.ts';
   import ProviderSettings from './ProviderSettings.svelte';
   import { messages, type Locale } from '$lib/sidepanel-i18n.ts';
@@ -29,6 +31,7 @@
     onExportSessionLog?: () => void | Promise<void>;
     refreshProviders: () => void | Promise<void>;
     onBrowserControlChanged: (state: BrowserControlState) => void;
+    onProfileChanged?: () => void;
     onboarding?: boolean;
     spotlight?: boolean;
     providerSpotlight?: boolean;
@@ -46,6 +49,7 @@
     onExportSessionLog,
     refreshProviders,
     onBrowserControlChanged,
+    onProfileChanged,
     onboarding = false,
     spotlight = false,
     providerSpotlight = false,
@@ -53,7 +57,8 @@
   }: Props = $props();
 
   let t = $derived(messages[locale]);
-  let shortcut = $derived(readShortcutLabel());
+  let shortcut = $state<string | null>(null);
+  let shortcutLabel = $derived(shortcut === null ? '…' : shortcut ? formatShortcutLabel(shortcut) : t.app.shortcutNotSet);
   let contentElement = $state<HTMLDivElement | null>(null);
   let browserAccessElement = $state<HTMLElement | null>(null);
   let diagnosticsElement = $state<HTMLElement | null>(null);
@@ -72,6 +77,14 @@
     'relative z-10 flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[12.5px] transition-[color,transform] duration-150 ease-[var(--ease-out)] active:scale-[0.97]';
   const TAB_BASE =
     'relative z-10 flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-[color,transform] duration-150 ease-[var(--ease-out)] active:scale-[0.97]';
+
+  $effect(() => {
+    if (!open) return;
+    const refresh = () => { void refreshShortcut(); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  });
 
   $effect(() => {
     if (!open || !contentElement || typeof ResizeObserver === 'undefined') return;
@@ -195,9 +208,20 @@
     notify?.({ ...notice, icon: notice.icon ?? 'model' });
   }
 
-  function readShortcutLabel() {
-    if (typeof navigator === 'undefined') return 'Alt E';
-    return navigator.platform.toLowerCase().includes('mac') ? '⌘ E' : 'Alt E';
+  async function refreshShortcut() {
+    try {
+      const commands = await browser.commands.getAll();
+      shortcut = commands.find((command) => command.name === '_execute_action')?.shortcut ?? '';
+    } catch (error) {
+      shortcut = '';
+      notifyBrowser({ tone: 'error', text: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  function formatShortcutLabel(value: string) {
+    const mac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
+    const macKey: Record<string, string> = { Command: '⌘', Shift: '⇧', Alt: '⌥', Ctrl: '⌃', MacCtrl: '⌃' };
+    return value.split('+').map((key) => mac ? macKey[key] ?? key : key).join(' ');
   }
 </script>
 
@@ -257,24 +281,31 @@
             >
               <span class="flex min-w-0 items-center gap-2.5">
                 <SidebarSimple class="fx-icon-draw text-muted-foreground group-hover:text-foreground size-[18px] shrink-0 transition-colors duration-150 ease-[var(--ease-out)]" strokeWidth={1.9} />
-                <span class="truncate text-[13.5px] font-medium text-foreground">{t.app.toggleSidePanel}</span>
+                <span class="min-w-0">
+                  <span class="block truncate text-[13.5px] font-medium text-foreground">{t.app.toggleSidePanel}</span>
+                  <span class="text-muted-foreground block truncate text-[11.5px]">{t.app.shortcutManagedByBrowser}</span>
+                </span>
               </span>
               <span class="flex shrink-0 items-center gap-2">
-                <kbd class="text-muted-foreground border bg-surface-2 rounded-lg px-2.5 py-1 font-mono text-[12.5px] tabular">{shortcut}</kbd>
+                <kbd class="text-muted-foreground border bg-surface-2 rounded-lg px-2.5 py-1 font-mono text-[12.5px] tabular">{shortcutLabel}</kbd>
                 <ArrowSquareOut class="text-muted-foreground/60 size-3.5 opacity-0 transition-opacity duration-150 ease-[var(--ease-out)] group-hover:opacity-100" />
               </span>
             </button>
           </section>
 
+          <section class="fx-enter {dimClass}" style="--fx-index: 3">
+            <ProfilePanel {locale} onChanged={onProfileChanged} {notify} />
+          </section>
+
           <section
             bind:this={browserAccessElement}
             class="fx-enter {browserSpotlightActive ? 'fx-spotlight' : ''}"
-            style="--fx-index: 3"
+            style="--fx-index: 4"
           >
             <BrowserAccessPanel {locale} notify={notifyBrowser} onChanged={handleBrowserAccessChanged} />
           </section>
 
-          <section bind:this={diagnosticsElement} class="fx-enter space-y-2 {dimClass}" style="--fx-index: 4">
+          <section bind:this={diagnosticsElement} class="fx-enter space-y-2 {dimClass}" style="--fx-index: 5">
             <p class="text-muted-foreground text-[11px] font-medium tracking-[0.04em] uppercase">{t.app.diagnostics}</p>
             <button
               type="button"

@@ -10,6 +10,7 @@
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import FileScan from '@lucide/svelte/icons/file-scan';
   import FolderCode from '@lucide/svelte/icons/folder-code';
+  import IdCard from '@lucide/svelte/icons/id-card';
   import ImageDown from '@lucide/svelte/icons/image-down';
   import MousePointerClick from '@lucide/svelte/icons/mouse-pointer-click';
   import Navigation2 from '@lucide/svelte/icons/navigation-2';
@@ -190,7 +191,7 @@
     if (tool.toolName === 'extractImage') return ImageDown;
     if (tool.toolName === 'browser' || tool.toolName === 'browserRepl') return MousePointerClick;
     if (tool.toolName === 'debugger') return Bug;
-    if (tool.toolName === 'fs') return FolderCode;
+    if (tool.toolName === 'fs') return readString(readRecord(tool.input)?.path) === '/profile.md' ? IdCard : FolderCode;
     return SquareTerminal;
   }
 
