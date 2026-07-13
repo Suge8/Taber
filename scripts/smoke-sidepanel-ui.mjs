@@ -4,7 +4,7 @@ import { connectCdp, connectTarget, delay, evaluate, evaluateStable, fetchJson, 
 import { prepareRuntimeBrowser } from './runtime-browser.mjs';
 import { assertRuntimeSmokeTarget, RUNTIME_SMOKE_PAGE } from './runtime-smoke-guard.mjs';
 
-const extensionPath = resolve('.output/chrome-mv3');
+const extensionPath = resolve(process.env.TABER_EXTENSION_DIR ?? '.output/chrome-mv3');
 const manifest = JSON.parse(readFileSync(resolve(extensionPath, 'manifest.json'), 'utf8'));
 const sidepanelPath = manifest.side_panel?.default_path || 'sidepanel.html';
 let runtime;
