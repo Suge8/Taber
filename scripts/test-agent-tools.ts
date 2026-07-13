@@ -555,6 +555,37 @@ assert.deepEqual(externalTargetMessages.filter(isRecord).map((message) => messag
   );
 }
 
+// A failed action whose tool.failed event cannot persist is also uncertain and must stop the task.
+{
+  const auditEvents: string[] = [];
+  const auditFailures: string[] = [];
+  let pageActions = 0;
+  const failedEventTools = createAgentTools({
+    sessionId: 1,
+    foregroundMode: false,
+    targetTabId: 7,
+    async sendMessage() {
+      pageActions += 1;
+      throw new Error('synthetic page action failure');
+    },
+    async emitEvent(type) {
+      auditEvents.push(type);
+      if (type === 'tool.failed') throw new Error('synthetic failed-event persistence failure');
+    },
+    async onAuditPersistenceFailure(error) { auditFailures.push(error); },
+    browserJsEnabled: false,
+  });
+
+  await assert.rejects(
+    () => runTool(failedEventTools.navigate, { action: 'currentTab' }),
+    (error: Error) => /action may have completed/i.test(error.message) && !error.message.includes('Hint:'),
+  );
+  assert.equal(pageActions, 1);
+  assert.deepEqual(auditEvents, ['tool.started', 'tool.failed']);
+  assert.equal(auditFailures.length, 1);
+  assert.match(auditFailures[0], /action may have completed/i);
+}
+
 // If tool.started cannot persist, the action has not run and no uncertain-result fatal is needed.
 {
   let pageActions = 0;

@@ -519,7 +519,11 @@ function createRunLogger(
           staleSkillTracker.hinted = true;
           error.message += `\nHint: you read ${staleSkillTracker.readSkillPaths.join(', ')} earlier. If that guidance is stale and caused these failures, update the skill with fs write.`;
         }
-        await emitEvent('tool.failed', { taskId, toolCallId, toolName, input, error: stringifyError(error), durationMs: elapsedMs(startedAt) });
+        try {
+          await emitEvent('tool.failed', { taskId, toolCallId, toolName, input, error: stringifyError(error), durationMs: elapsedMs(startedAt) });
+        } catch (persistenceError) {
+          await throwAuditPersistenceFailure(toolName, toolCallId, persistenceError, onAuditPersistenceFailure);
+        }
         throw error;
       }
 
@@ -530,16 +534,25 @@ function createRunLogger(
         await appendToolRun({ sessionId, toolName, input, output: recorded, durationMs });
         await emitEvent('tool.completed', { taskId, toolCallId, toolName, input, output: recorded, durationMs });
       } catch (error) {
-        const failure = new AuditPersistenceError(
-          `Audit persistence failed after ${toolName}${toolCallId ? ` (${toolCallId})` : ''} (${auditErrorName(error)}). The action may have completed; the task was stopped to avoid repeating it.`,
-          { cause: error },
-        );
-        await onAuditPersistenceFailure?.(failure.message);
-        throw failure;
+        await throwAuditPersistenceFailure(toolName, toolCallId, error, onAuditPersistenceFailure);
       }
       return output;
     };
   };
+}
+
+async function throwAuditPersistenceFailure(
+  toolName: string,
+  toolCallId: string | undefined,
+  error: unknown,
+  onAuditPersistenceFailure?: (error: string) => Promise<void>,
+): Promise<never> {
+  const failure = new AuditPersistenceError(
+    `Audit persistence failed after ${toolName}${toolCallId ? ` (${toolCallId})` : ''} (${auditErrorName(error)}). The action may have completed; the task was stopped to avoid repeating it.`,
+    { cause: error },
+  );
+  await onAuditPersistenceFailure?.(failure.message);
+  throw failure;
 }
 
 function auditErrorName(error: unknown) {
