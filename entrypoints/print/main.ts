@@ -20,7 +20,12 @@ async function render() {
   document.title = file.name;
   const text = new TextDecoder().decode(file.data);
   const html = file.mimeType === 'text/html' ? text : await marked.parse(text);
-  content.innerHTML = DOMPurify.sanitize(html);
+  content.innerHTML = DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['style', 'img', 'picture', 'source', 'video', 'audio', 'track', 'iframe', 'object', 'embed', 'link', 'meta'],
+    FORBID_ATTR: ['style', 'src', 'srcset', 'poster', 'background', 'ping', 'formaction'],
+  });
+  for (const link of content.querySelectorAll('a[href]')) link.setAttribute('rel', 'noreferrer noopener');
   requestAnimationFrame(() => window.print());
 }
 

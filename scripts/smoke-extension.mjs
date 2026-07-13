@@ -1,6 +1,7 @@
 import { access, readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import path from 'node:path';
-import { connectCdp, connectTarget, delay, evaluate, fetchJson, hasCdpEndpoint, waitForTarget } from './cdp-client.mjs';
+import { connectCdp, connectTarget, delay, evaluate, evaluateStable, fetchJson, hasCdpEndpoint, waitForTarget } from './cdp-client.mjs';
 import { prepareRuntimeBrowser } from './runtime-browser.mjs';
 
 const drySmoke = process.argv.includes('--dry-smoke');
@@ -90,6 +91,7 @@ try {
   })`);
   assert(offscreenState.ready === true, 'offscreen not ready');
   await verifyOffscreenStartRollback(pageCdp);
+  await verifyPrintResourceIsolation(browserCdp, pageCdp, runtime.cdpOrigin, runtime.extensionId);
   if (failAfterEnsure) throw new Error('intentional smoke failure after offscreen ensure');
 
   console.info('runtime extension smoke passed');
@@ -127,6 +129,153 @@ async function verifyOffscreenStartRollback(cdp) {
   const started = await sendRuntimeMessage(cdp, request);
   assert(Number.isInteger(started?.sessionId) && typeof started?.taskId === 'string', `task host remained stuck after failed start: ${JSON.stringify(started)}`);
   await sendRuntimeMessage(cdp, { type: 'taber.agent.stopTask' });
+}
+
+async function verifyPrintResourceIsolation(browserCdp, databaseCdp, cdpOrigin, extensionId) {
+  const canary = await startPrintCanaryServer();
+  const canaryUrl = `${canary.origin}/print-resource-canary`;
+  const html = `
+    <h1 id="print-smoke-title">Safe title</h1>
+    <p id="print-smoke-paragraph">Safe paragraph</p>
+    <ul><li>Safe list item with <code>inline code</code></li></ul>
+    <table><tbody><tr><td>Safe cell</td></tr></tbody></table>
+    <a id="print-smoke-link" href="https://example.test/source">Source link</a>
+    <img src="${canaryUrl}?kind=img">
+    <style>.remote-style { background-image: url("${canaryUrl}?kind=style"); }</style>
+    <div class="remote-style">Styled block</div>
+    <picture><source srcset="${canaryUrl}?kind=srcset 1x"><img src="${canaryUrl}?kind=picture"></picture>
+    <video poster="${canaryUrl}?kind=poster"></video>
+    <svg><image href="${canaryUrl}?kind=svg"></image></svg>
+  `;
+  const markdown = `# Markdown title\n\nSafe markdown paragraph.\n\n![Remote image](${canaryUrl}?kind=markdown)`;
+  const fileIds = await seedPrintFiles(databaseCdp, html, markdown);
+  try {
+    const htmlReport = await openPrintFile(browserCdp, cdpOrigin, extensionId, fileIds.htmlId, canaryUrl);
+    const markdownReport = await openPrintFile(browserCdp, cdpOrigin, extensionId, fileIds.markdownId, canaryUrl);
+
+    assert(htmlReport.safeContent, `print HTML lost safe document content: ${JSON.stringify(htmlReport)}`);
+    assert(markdownReport.markdownContent, `print Markdown lost safe document content: ${JSON.stringify(markdownReport)}`);
+    const requestedCanaries = [...htmlReport.canaryRequests, ...markdownReport.canaryRequests, ...canary.requests];
+    assert(requestedCanaries.length === 0, `print document requested remote canary resources: ${JSON.stringify(requestedCanaries)}`);
+    assert(htmlReport.forbiddenTags === 0 && markdownReport.forbiddenTags === 0, 'print document retained an active resource tag');
+    assert(htmlReport.forbiddenAttributes === 0 && markdownReport.forbiddenAttributes === 0, 'print document retained an active resource attribute');
+    assert(htmlReport.linkHref === 'https://example.test/source', 'print document removed the static source link');
+    assert(htmlReport.linkRel.includes('noreferrer') && htmlReport.linkRel.includes('noopener'), 'print source link is missing rel protections');
+  } finally {
+    await deletePrintFiles(databaseCdp, Object.values(fileIds)).catch(() => undefined);
+    await canary.close();
+  }
+}
+
+async function openPrintFile(browserCdp, cdpOrigin, extensionId, fileId, canaryUrl) {
+  const pageTarget = await browserCdp.send('Target.createTarget', { url: 'about:blank' });
+  let printCdp;
+  try {
+    const target = await waitForTarget(cdpOrigin, (candidate) => candidate.id === pageTarget.targetId && hasCdpEndpoint(candidate), 15_000);
+    printCdp = await connectTarget(target);
+    await Promise.all([printCdp.send('Runtime.enable'), printCdp.send('Page.enable'), printCdp.send('Network.enable')]);
+    await printCdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `Object.defineProperty(window, 'print', { configurable: true, value: () => { document.documentElement.dataset.printCalled = 'true'; } });`,
+    });
+    const canaryRequests = [];
+    const removeRequestListener = printCdp.on('Network.requestWillBeSent', ({ request }) => {
+      if (typeof request?.url === 'string' && request.url.startsWith(canaryUrl)) canaryRequests.push(request.url);
+    });
+    await printCdp.send('Page.navigate', { url: `chrome-extension://${extensionId}/print.html?file=${fileId}` });
+    const report = await evaluateStable(printCdp, `new Promise((resolve, reject) => {
+      const deadline = Date.now() + 10000;
+      const read = () => {
+        const content = document.getElementById('content');
+        if (content && document.documentElement.dataset.printCalled === 'true') {
+          const forbiddenTags = content.querySelectorAll('style,img,picture,source,video,audio,track,iframe,object,embed,link,meta,svg,image').length;
+          const forbidden = new Set(['style', 'src', 'srcset', 'poster', 'background', 'ping', 'formaction']);
+          const forbiddenAttributes = [...content.querySelectorAll('*')].reduce((count, element) => count + [...element.attributes].filter((attribute) => forbidden.has(attribute.name.toLowerCase())).length, 0);
+          const link = content.querySelector('#print-smoke-link');
+          resolve({
+            safeContent: content.querySelector('#print-smoke-title')?.textContent === 'Safe title'
+              && content.querySelector('#print-smoke-paragraph')?.textContent === 'Safe paragraph'
+              && content.querySelector('li')?.textContent.includes('Safe list item')
+              && content.querySelector('code')?.textContent === 'inline code'
+              && content.querySelector('td')?.textContent === 'Safe cell',
+            markdownContent: content.querySelector('h1')?.textContent === 'Markdown title' && content.textContent.includes('Safe markdown paragraph.'),
+            forbiddenTags,
+            forbiddenAttributes,
+            linkHref: link?.getAttribute('href') || '',
+            linkRel: link?.getAttribute('rel') || '',
+          });
+          return;
+        }
+        if (Date.now() > deadline) { reject(new Error('print document did not render: ' + (content?.textContent || document.body.innerText).slice(0, 300))); return; }
+        requestAnimationFrame(read);
+      };
+      read();
+    })`);
+    removeRequestListener();
+    return { ...report, canaryRequests };
+  } finally {
+    printCdp?.close();
+    await browserCdp.send('Target.closeTarget', { targetId: pageTarget.targetId }).catch(() => undefined);
+  }
+}
+
+function seedPrintFiles(cdp, html, markdown) {
+  return evaluate(cdp, `new Promise((resolve, reject) => {
+    const open = indexedDB.open('taber');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction(['files'], 'readwrite');
+      const store = tx.objectStore('files');
+      const now = Date.now();
+      const sessionId = Number.MAX_SAFE_INTEGER - 1;
+      const ids = {};
+      const add = (key, name, mimeType, content) => {
+        const data = new TextEncoder().encode(content).buffer;
+        const request = store.add({ sessionId, name, mimeType, data, size: data.byteLength, createdAt: now, updatedAt: now });
+        request.onsuccess = () => { ids[key] = Number(request.result); };
+      };
+      add('htmlId', 'print-smoke-' + now + '.html', 'text/html', ${JSON.stringify(html)});
+      add('markdownId', 'print-smoke-' + now + '.md', 'text/markdown', ${JSON.stringify(markdown)});
+      tx.oncomplete = () => { db.close(); resolve(ids); };
+      tx.onerror = () => { const error = tx.error; db.close(); reject(error); };
+    };
+  })`);
+}
+
+function deletePrintFiles(cdp, fileIds) {
+  return evaluate(cdp, `new Promise((resolve, reject) => {
+    const open = indexedDB.open('taber');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction(['files'], 'readwrite');
+      const store = tx.objectStore('files');
+      for (const fileId of ${JSON.stringify(fileIds)}) store.delete(fileId);
+      tx.oncomplete = () => { db.close(); resolve(true); };
+      tx.onerror = () => { const error = tx.error; db.close(); reject(error); };
+    };
+  })`);
+}
+
+async function startPrintCanaryServer() {
+  const requests = [];
+  const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+  const server = createServer((request, response) => {
+    if (request.url?.startsWith('/print-resource-canary')) requests.push(`http://${request.headers.host}${request.url}`);
+    response.writeHead(200, { 'content-type': 'image/png', 'content-length': image.length });
+    response.end(image);
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('print canary server did not expose a TCP port');
+  return {
+    origin: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
 }
 
 async function verifyNativeActionToggle(cdp, cdpOrigin, extensionId, pageTargetId) {
