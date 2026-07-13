@@ -1,5 +1,10 @@
 export const DEFAULT_BROWSER_TOOL_TIMEOUT_MS = 5_000;
 export const MAX_BROWSER_SNAPSHOT_ELEMENTS = 80;
+const BROWSER_STATE_REF_SHAPE = /^b[0-9a-f]+\.\d+$/;
+
+export function hasBrowserStateRefShape(ref: string) {
+  return BROWSER_STATE_REF_SHAPE.test(ref);
+}
 
 export type PageTarget =
   | { ref: string }
@@ -100,17 +105,18 @@ function readPageTarget(value: unknown, name: string): PageTarget {
   const text = readFilledString(value.text);
   const selector = readFilledString(value.selector);
 
-  // A ref comes from browser state and is the most precise locator; models
-  // often echo the matching text/role alongside it. Prefer the ref outright:
-  // stale refs come back as recoverable STALE_REF, so the feedback loop holds.
-  if (ref) return { ref };
-
   const semantic: PageTarget[] = [];
   if (role && roleName) semantic.push({ role, name: roleName });
   if (label) semantic.push({ label });
   if (text) semantic.push({ text });
   if (selector) semantic.push({ selector });
-  if (semantic.length === 1) return semantic[0];
+  const onlySemantic = semantic.length === 1 ? semantic[0] : undefined;
+
+  // A well-shaped ref is the most precise locator and stale refs return fresh
+  // state. A malformed ref can never resolve; use one unambiguous semantic
+  // companion when available, otherwise preserve it for explicit diagnostics.
+  if (ref) return !hasBrowserStateRefShape(ref) && onlySemantic ? onlySemantic : { ref };
+  if (onlySemantic) return onlySemantic;
   if (semantic.length === 0 && typeof value.x === 'number' && Number.isFinite(value.x) && typeof value.y === 'number' && Number.isFinite(value.y)) {
     return { x: value.x, y: value.y };
   }

@@ -8,6 +8,7 @@ import { canUseCdpFallback, executeBrowserReplCdpFallback } from '../lib/browser
 import { chromeApiRequestType } from '../lib/chrome-api-broker.ts';
 import { createAgentTools } from '../lib/agent-tools.ts';
 import { createBrowserReplPageExecutor } from '../lib/browser-repl-executor.ts';
+import { parseBrowserInput } from '../lib/browser-tool.ts';
 import { createBrowserReplUserScript, runBrowserReplPageRuntime } from '../lib/browser-repl-page.ts';
 import { runTaberPageOverlayCommand } from '../lib/browser-repl-visual-page.ts';
 import { createSession, database, initializeDatabase } from '../lib/db.ts';
@@ -1563,7 +1564,7 @@ async function testFrameRouterSameOriginIframeEndToEnd() {
   ];
   const pages = new Map([
     [0, new FrameRouterFakePage('Main', 'https://main.test/page', [frameButton('Main CTA')])],
-    [1, new FrameRouterFakePage('Same Frame', 'https://main.test/frame', [frameButton('Same CTA'), frameInput('Same Name')])],
+    [1, new FrameRouterFakePage('Same Frame', 'https://main.test/frame', [frameButton('Same CTA'), frameTab('Security'), frameInput('Same Name')])],
   ]);
   const executor = createFrameRouterTestExecutor({ frames: () => frames, pages });
 
@@ -1575,6 +1576,16 @@ async function testFrameRouterSameOriginIframeEndToEnd() {
   const clicked = await executor.executePageCommand(1, { helper: 'browser', args: [{ action: 'click', target: { ref } }] }) as Record<string, any>;
   assert.equal(clicked.ok, true);
   assert.equal(pages.get(1)?.clicked, 'Same CTA');
+
+  const securityRef = findFrameElement(clicked.state, 'https://main.test/frame', 'Security').ref;
+  const sessionInput = parseBrowserInput({
+    action: 'click',
+    target: { ref: `${securityRef} rev?`, role: 'tab', name: 'Security', label: '', text: '', selector: '', x: 0, y: 0 },
+  });
+  const recoveredClick = await executor.executePageCommand(1, { helper: 'browser', args: [sessionInput] }) as Record<string, any>;
+  assert.equal(recoveredClick.ok, true, 'a corrupted ref must yield to the valid semantic locator instead of INVALID_TARGET');
+  assert.equal(pages.get(1)?.clicked, 'Security');
+
   const filled = await executor.executePageCommand(1, { helper: 'browser', args: [{ action: 'fill', target: { label: 'Same Name' }, value: 'same-origin' }] }) as Record<string, any>;
   assert.equal(filled.ok, true);
   assert.equal(pages.get(1)?.value('Same Name'), 'same-origin');
@@ -2159,6 +2170,10 @@ type FrameRouterElement = { tag: 'button' | 'input'; name: string; role: string;
 
 function frameButton(name: string): FrameRouterElement {
   return { tag: 'button', name, role: 'button', kind: 'button' };
+}
+
+function frameTab(name: string): FrameRouterElement {
+  return { tag: 'button', name, role: 'tab', kind: 'button' };
 }
 
 function frameInput(name: string): FrameRouterElement {

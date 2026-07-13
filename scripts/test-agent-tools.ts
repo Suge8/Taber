@@ -129,10 +129,16 @@ assert.deepEqual(
 );
 assert.deepEqual(parseBrowserInput({ action: 'click', target: { x: 10, y: 20, text: 'Save' } }), { action: 'click', target: { text: 'Save' } });
 assert.deepEqual(parseBrowserInput({ action: 'click', target: { x: 0, y: 0 } }), { action: 'click', target: { x: 0, y: 0 } });
-// A ref wins over echoed companions: it is the most precise locator and stale refs surface as STALE_REF.
-assert.deepEqual(parseBrowserInput({ action: 'click', target: { ref: 'r1.1', text: 'Save' } }), { action: 'click', target: { ref: 'r1.1' } });
+// A valid ref wins over echoed companions: it is the most precise locator and stale refs surface as STALE_REF.
+assert.deepEqual(parseBrowserInput({ action: 'click', target: { ref: 'babc123.1', text: 'Save' } }), { action: 'click', target: { ref: 'babc123.1' } });
+// Session 11 regression: a model-corrupted ref must not suppress the one valid semantic locator.
 assert.deepEqual(
-  parseBrowserInput({ action: 'click', target: { ref: 'bef9f0e96c444.1abc', role: 'button', name: 'Search', label: 'Search', text: 'Search', selector: '#fake' } }),
+  parseBrowserInput({ action: 'click', target: { ref: 'b9955663e735a.53 rev?', role: 'tab', name: 'Security', label: '', text: '', selector: '', x: 0, y: 0 } }),
+  { action: 'click', target: { role: 'tab', name: 'Security' } },
+);
+// Conflicting companions are not a safe fallback, so the router still reports the malformed ref.
+assert.deepEqual(
+  parseBrowserInput({ action: 'click', target: { ref: 'bef9f0e96c444.1abc', role: 'button', name: 'Search', label: 'Other field' } }),
   { action: 'click', target: { ref: 'bef9f0e96c444.1abc' } },
 );
 assert.throws(() => parseBrowserInput({ action: 'click', target: { text: 'Save', selector: '#save' } }), /exactly one locator/);

@@ -1,5 +1,5 @@
 import { originPatternForUrl } from './browser-access.ts';
-import type { BrowserInput, BrowserResult, PageTarget } from './browser-tool.ts';
+import { hasBrowserStateRefShape, type BrowserInput, type BrowserResult, type PageTarget } from './browser-tool.ts';
 import type { BrowserReplPageCommand } from './browser-repl-command.ts';
 import type { ChromeApiAction } from './chrome-api-broker.ts';
 
@@ -13,8 +13,6 @@ type Candidate = { ref: string; score: number; context: Record<string, unknown>;
 
 const MAIN_FRAME_ID = 0;
 const STALE_REF_MESSAGE = 'Ref is stale. Use browser.snapshot again and retry with a ref from the latest browser state.';
-// Router-issued refs are always `b<hex snapshot id>.<sequence>`.
-const ISSUED_REF_SHAPE = /^b[0-9a-f]+\.\d+$/;
 const FRAME_HINT = 'Grant Website access for the iframe origin, or open the iframe source page and operate it directly.';
 
 export function createBrowserFrameRouter(options: { runFrameCommand: RunFrameCommand; callChromeApi: CallChromeApi }) {
@@ -77,7 +75,7 @@ class BrowserFrameRouter {
       // Models sometimes splice or invent ref strings ("b<id>.133.143"). Calling
       // that "stale" sends them into a useless re-snapshot loop; name the real
       // problem so the next attempt copies a ref from the attached state instead.
-      if (!ISSUED_REF_SHAPE.test(ref)) return this.refFailure(tabId, command, input, 'INVALID_TARGET', `Ref "${ref}" was never issued by browser state. Refs must be copied exactly from the latest state, never constructed or edited; pick one from the state in this result.`, abortSignal);
+      if (!hasBrowserStateRefShape(ref)) return this.refFailure(tabId, command, input, 'INVALID_TARGET', `Ref "${ref}" was never issued by browser state. Refs must be copied exactly from the latest state, never constructed or edited; pick one from the state in this result.`, abortSignal);
       return this.refFailure(tabId, command, input, 'STALE_REF', STALE_REF_MESSAGE, abortSignal);
     }
     const frame = (await this.frames(tabId, abortSignal)).find((item) => item.frameId === routed.frameId);
