@@ -28,7 +28,8 @@ export default defineConfig({
   }),
   manifest: {
     name: 'Taber',
-    description: 'Browser agent side panel for reading pages and using the web.',
+    description: '__MSG_extensionDescription__',
+    default_locale: 'en',
     minimum_chrome_version: '135',
     permissions: [
       'storage',
