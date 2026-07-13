@@ -312,6 +312,12 @@ export function installBrowserReplPageLocator() {
     add(pageSiblingText(element, 'previousElementSibling'), 0.9);
     add(pageSiblingText(element, 'nextElementSibling'), 0.75);
     add(element.parentElement?.innerText || element.parentElement?.textContent, 0.75);
+    // Component libraries often render the visible label outside the input's
+    // immediate wrapper and omit for/aria-labelledby (e.g. a "Phone Number"
+    // form item whose input only says "number picker"). Use the nearest small
+    // ancestor that owns exactly this one fillable control; multi-field rows
+    // are deliberately excluded to avoid assigning a shared label to both.
+    add(pageNearestSingleFieldContext(element), 0.95);
     add(pageSectionText(element), 0.65);
     return texts;
   }
@@ -322,6 +328,16 @@ export function installBrowserReplPageLocator() {
   function pageSiblingText(element: HTMLElement, key: 'previousElementSibling' | 'nextElementSibling') {
     const sibling = element[key] as HTMLElement | null;
     return sibling ? sibling.innerText || sibling.textContent || '' : '';
+  }
+  function pageNearestSingleFieldContext(element: HTMLElement) {
+    let node = element.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < 6; depth += 1, node = node.parentElement) {
+      const fields = [...node.querySelectorAll(pageFillableSelector())].filter((candidate) => candidate instanceof HTMLElement && pageIsVisible(candidate, 'page') && !pageIsDisabled(candidate));
+      if (fields.length !== 1 || fields[0] !== element) continue;
+      const text = pageShortText(node.innerText || node.textContent || '');
+      if (text && text.length <= 120) return text;
+    }
+    return '';
   }
   function pageSectionText(element: HTMLElement) {
     for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {

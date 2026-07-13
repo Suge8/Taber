@@ -81,7 +81,7 @@ export function createBrowserReplInputJsonSchema(_options: { browserJsEnabled?: 
     additionalProperties: false,
     required: ['code'],
     properties: {
-      code: { type: 'string', description: 'JavaScript REPL code for the controlled target tab. Single expressions return automatically; multi-statement code must explicitly return evidence. Use the structured browser tool first for text/role/label/ref click, fill, press, and snapshot; use browserRepl only as an advanced fallback. Page-reading fallback helpers: readVisibleText(), readLinksAndButtons(), listInteractiveElements(), or queryText("text") report open shadow roots and frames[]; same-origin frames are readable summaries, cross-origin frames are metadata only. Prefer one observe()/query(native CSS) snapshot only when action indexes are needed, one batch/fillForm action, and one verification. waitFor("text") is shorthand for waitFor({ text: "text" }); use waitFor/action auto-wait for page changes, not sleep/setTimeout polling. Obvious CSS like "body", "#id", or ".class" is shorthand for { selector }. observe("text") is invalid and does not search text. Native CSS does not support Playwright selectors like :has-text(); use browser text/role locators first, queryText("text"), waitFor({ text }) for waits, or observe/query then a same-call index for actions. click/fill/press indexes are valid only after observe/query in the same browserRepl call; prefer selectors for durable actions. For forms, use fillForm dryRun/execution, inspect missing/ambiguous, then pickElement/pickUserElement if needed. Use navigate(input) instead of direct location/history/window.open navigation. Return concise serializable evidence only; no DOM/functions/Window/Event/cycles/dataUrl.' },
+      code: { type: 'string', description: 'JavaScript REPL code for the controlled target tab. Single expressions return automatically; multi-statement code must explicitly return evidence. Use the structured browser tool first for text/role/label/ref click, fill, press, and snapshot; use browserRepl only as an advanced fallback. All helpers are async. Result shapes: const { elements } = await observe() or query(css); const { text } = await readVisibleText(). Elements are serializable descriptors (name/value/index/selector), not DOM nodes: read their fields directly, never call getAttribute/querySelector. Page-reading fallback helpers: readVisibleText(), readLinksAndButtons(), listInteractiveElements(), or queryText("text") report open shadow roots and frames[]; same-origin frames are readable summaries, cross-origin frames are metadata only. Prefer one observe()/query(native CSS) snapshot only when element objects are needed, one batch/fillForm action, and one verification. waitFor("text") is shorthand for waitFor({ text: "text" }); use waitFor/action auto-wait for page changes, not sleep/setTimeout polling. Obvious CSS like "body", "#id", or ".class" is shorthand for { selector }. observe("text") is invalid and does not search text. Native CSS does not support Playwright selectors like :has-text(); use browser text/role locators first, queryText("text"), waitFor({ text }) for waits, or observe/query then a same-call element object for actions. click/fill/press accept an exact CSS selector or an element object from observe/query in the same browserRepl call: const {elements}=await query(css); await fill(elements[0], value). Never pass a bare number (array positions and element indexes differ). Coordinates belong to the structured browser tool. Never guess selectors or attributes: query first, then use the element object or its exact selector. For forms, use fillForm dryRun/execution, inspect missing/ambiguous, then pickElement/pickUserElement if needed. Use navigate(input) instead of direct location/history/window.open navigation. Return concise serializable evidence only; no DOM/functions/Window/Event/cycles/dataUrl.' },
     },
   } as const;
 }
@@ -110,7 +110,10 @@ export function rememberBrowserReplElementRefs(value: unknown, refs: Map<number,
       if (!isBrowserReplElementRef(element.ref)) return visibleElement;
       const index = allocateIndex();
       refs.set(index, element.ref);
-      return { ...visibleElement, index };
+      // Promote the exact selector from the hidden internal ref. Models can use
+      // elements[n] directly (safest) or copy selector across calls without
+      // guessing attributes such as #phone.
+      return { ...visibleElement, index, selector: element.ref.selector };
     }),
   };
 }
@@ -135,8 +138,9 @@ export function normalizeBrowserReplWaitOptions(value: unknown) {
 export function readBrowserReplActionTarget(refs: Map<number, BrowserReplElementRef>, value: unknown, name: string) {
   if (typeof value === 'string') return value;
   if (isBrowserReplElementRef(value)) return value;
-  if (Number.isInteger(value)) return requireRef(refs, value);
-  throw new Error(`${name} must be a selector string or same-call element index`);
+  if (isRecord(value) && Number.isInteger(value.index)) return requireRef(refs, value.index);
+  if (Number.isInteger(value)) throw new Error(`${name} cannot be a bare number: array positions are 0-based but element indexes are not. Pass the element object directly, for example fill(elements[0], value), or use its exact selector.`);
+  throw new Error(`${name} must be an exact CSS selector or an element object from observe/query in this browserRepl call. Coordinates are supported only by the structured browser tool.`);
 }
 
 export function readBrowserReplPressArgs(refs: Map<number, BrowserReplElementRef>, targetOrKey: unknown, key: unknown) {

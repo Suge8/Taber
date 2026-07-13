@@ -28,7 +28,7 @@ export type BrowserResult = {
   state?: unknown;
 };
 
-export const browserDescription = 'Structured page interaction with human-readable locators. Use for clicks, fills, keypresses, and reading page state. Actions: snapshot reads state and ignores target; click, fill, and press operate one target. Locators: prefer { text }, { role, name }, { label }, or { ref } from browser state; { selector } is fallback; { x, y } is the visual fallback for canvas/visual UIs where semantic locators fail — coordinates are viewport CSS px (state.viewport gives width/height; from a screenshot, scale pixel coords by viewport.width/imageWidth). Refs are opaque handles that remain valid across snapshots and ordinary DOM updates while the same marked element stays visible and unchanged; page/frame changes, removal, replacement, or fingerprint changes make them stale. Actions auto-wait for DOM stability and return fresh state. Returns ok:false with code/message/candidates for ambiguous, stale, invisible, disabled, or non-fillable targets. Snapshot reports open shadow roots and frames[]; same-origin iframe content includes frames[].elements refs, cross-origin shows FRAME_NOT_ACCESSIBLE with hints.';
+export const browserDescription = 'Structured page interaction with human-readable locators. Use for clicks, fills, keypresses, and reading page state. Actions: snapshot reads state and ignores target; click, fill, and press operate one target. Locators: prefer { text }, { role, name }, { label }, or { ref } from browser state; { selector } is fallback; { x, y } is the visual fallback for canvas/visual UIs where semantic locators fail — coordinates are viewport CSS px (state.viewport gives width/height; from a screenshot, scale pixel coords by viewport.width/imageWidth). Refs are opaque handles that remain valid across snapshots and ordinary DOM updates while the same marked element stays visible and unchanged; page/frame changes, removal, replacement, or fingerprint changes make them stale. Never construct or edit ref strings; copy them exactly from the latest state. Actions auto-wait for DOM stability and return fresh state. Returns ok:false with code/message/candidates for ambiguous, stale, invisible, disabled, or non-fillable targets. Snapshot reports open shadow roots and frames[]; same-origin iframe content includes frames[].elements refs, cross-origin shows FRAME_NOT_ACCESSIBLE with hints.';
 
 const targetDescription = 'Exactly one PageTarget locator: { ref } from browser state, { role, name }, { label }, { text }, { selector }, or { x, y } viewport CSS px. Prefer text/role/label/ref; selector is fallback; x/y is the last resort for visual-only targets.';
 
@@ -71,6 +71,9 @@ export function parseBrowserInput(value: unknown): BrowserInput {
   if (action === 'click') input.target = readPageTarget(value.target, 'target');
   if (action === 'fill') {
     input.target = readPageTarget(value.target, 'target');
+    // Empty value is ambiguous between "clear the field" and the placeholder
+    // noise degraded models emit; keep rejecting it but point at the safe path.
+    if (typeof value.value === 'string' && value.value.trim() === '') throw new Error('value must be a non-empty string. To clear a field, use browserRepl: fill(target, "").');
     input.value = readNonEmptyString(value.value, 'value');
   }
   if (action === 'press') {

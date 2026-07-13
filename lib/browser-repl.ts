@@ -81,7 +81,7 @@ export function createBrowserReplController(options: {
   async function run(value: unknown, abortSignal?: AbortSignal): Promise<BrowserReplResult> {
     const input = parseBrowserReplInput(value);
     const budget = createRunBudget(abortSignal, scheduler);
-    return runWithinBudget(input, budget).catch((error) => { throw budget.normalizeError(error); }).finally(() => budget.close());
+    return runWithinBudget(input, budget).catch((error) => { throw withHelperResultHint(budget.normalizeError(error), input.code); }).finally(() => budget.close());
   }
 
   async function runWithinBudget(input: BrowserReplInput, budget: RunBudget): Promise<BrowserReplResult> {
@@ -164,7 +164,7 @@ export function createBrowserReplController(options: {
         ok: false,
         code: 'NO_EVIDENCE',
         message: 'browserRepl completed without returning evidence.',
-        retryHint: 'Do not repeat possible side effects. Inspect fresh state with browser.snapshot, or return the result from multi-statement code.',
+        retryHint: 'Do not repeat possible side effects. Inspect fresh state with browser.snapshot, or return the result from multi-statement code. For action sequences prefer await batch(actions), which returns per-step evidence.',
       };
     }
     return browserJsConsole.length ? { value: evidence ?? null, browserjs: { console: browserJsConsole } } : { value: evidence };
@@ -247,6 +247,23 @@ function createRunBudget(parentSignal: AbortSignal | undefined, scheduler: Sched
       abortController.abort();
     },
   };
+}
+
+/**
+ * BrowserRepl helpers cross a structured-clone boundary and return serializable
+ * result objects, not DOM collections. Rewrite weak JS TypeErrors into the
+ * exact result shape so one failed attempt does not become blind exploration.
+ */
+function withHelperResultHint(error: Error, code: string): Error {
+  if (!/(?:filter|slice|map) is not a function/.test(error.message)) return error;
+  if (/\b(?:observe|query)\s*\(/.test(code)) {
+    error.message += '. observe() and query() return { elements }, not arrays: use (await query(...)).elements.slice(...). Elements are serializable descriptors; read fields such as name/value directly, not DOM methods like getAttribute().';
+    return error;
+  }
+  if (/\breadVisibleText\s*\(/.test(code)) {
+    error.message += '. readVisibleText() returns { text, title, url }: use (await readVisibleText(...)).text.slice(...).';
+  }
+  return error;
 }
 
 function browserReplTimeoutError(cause?: unknown) {

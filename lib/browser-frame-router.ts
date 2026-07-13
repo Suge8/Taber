@@ -13,6 +13,8 @@ type Candidate = { ref: string; score: number; context: Record<string, unknown>;
 
 const MAIN_FRAME_ID = 0;
 const STALE_REF_MESSAGE = 'Ref is stale. Use browser.snapshot again and retry with a ref from the latest browser state.';
+// Router-issued refs are always `b<hex snapshot id>.<sequence>`.
+const ISSUED_REF_SHAPE = /^b[0-9a-f]+\.\d+$/;
 const FRAME_HINT = 'Grant Website access for the iframe origin, or open the iframe source page and operate it directly.';
 
 export function createBrowserFrameRouter(options: { runFrameCommand: RunFrameCommand; callChromeApi: CallChromeApi }) {
@@ -71,9 +73,15 @@ class BrowserFrameRouter {
 
   private async executeRefAction(tabId: number, command: BrowserReplPageCommand, input: BrowserInput, ref: string, abortSignal?: AbortSignal) {
     const routed = this.refs.get(ref);
-    if (!routed || routed.tabId !== tabId) return this.staleRef(tabId, command, input, STALE_REF_MESSAGE, abortSignal);
+    if (!routed || routed.tabId !== tabId) {
+      // Models sometimes splice or invent ref strings ("b<id>.133.143"). Calling
+      // that "stale" sends them into a useless re-snapshot loop; name the real
+      // problem so the next attempt copies a ref from the attached state instead.
+      if (!ISSUED_REF_SHAPE.test(ref)) return this.refFailure(tabId, command, input, 'INVALID_TARGET', `Ref "${ref}" was never issued by browser state. Refs must be copied exactly from the latest state, never constructed or edited; pick one from the state in this result.`, abortSignal);
+      return this.refFailure(tabId, command, input, 'STALE_REF', STALE_REF_MESSAGE, abortSignal);
+    }
     const frame = (await this.frames(tabId, abortSignal)).find((item) => item.frameId === routed.frameId);
-    if (!frame || frame.url !== routed.frameUrl) return this.staleRef(tabId, command, input, 'Ref is stale because the target frame changed. Use browser.snapshot again and retry with a new ref.', abortSignal);
+    if (!frame || frame.url !== routed.frameUrl) return this.refFailure(tabId, command, input, 'STALE_REF', 'Ref is stale because the target frame changed. Use browser.snapshot again and retry with a new ref.', abortSignal);
     const nextInput = { ...input, target: { ref: routed.localRef } };
     const result = await this.runFrameCommand(tabId, routed.frameId, pageCommand(command, nextInput), abortSignal) as BrowserResult;
     if (routed.frameId !== MAIN_FRAME_ID) return this.withFreshState(tabId, command, input, result, abortSignal);
@@ -149,9 +157,9 @@ class BrowserFrameRouter {
     return isRecord(snapshot?.state) ? { ...result, state: snapshot.state } : result;
   }
 
-  private async staleRef(tabId: number, command: BrowserReplPageCommand, input: BrowserInput, message: string, abortSignal?: AbortSignal) {
+  private async refFailure(tabId: number, command: BrowserReplPageCommand, input: BrowserInput, code: 'STALE_REF' | 'INVALID_TARGET', message: string, abortSignal?: AbortSignal) {
     const snapshot = await this.snapshot(tabId, snapshotCommand(command, input), abortSignal).catch(() => undefined) as BrowserResult | undefined;
-    return { ok: false, action: input.action, code: 'STALE_REF', message, ...(isRecord(snapshot?.state) ? { state: snapshot.state } : {}) };
+    return { ok: false, action: input.action, code, message, ...(isRecord(snapshot?.state) ? { state: snapshot.state } : {}) };
   }
 
   private rewriteElements(value: unknown, target: SnapshotTarget) {
@@ -196,8 +204,15 @@ function readBrowserInput(command: BrowserReplPageCommand): BrowserInput {
   return input;
 }
 
+// A model's action limit (often 1) targets the action itself; derived
+// snapshots exist for recovery and semantic resolution, so a tiny limit would
+// starve them (a STALE_REF result carrying one element forces an extra
+// snapshot round trip).
+const DERIVED_SNAPSHOT_MIN_LIMIT = 30;
+
 function snapshotInput(input: BrowserInput): BrowserInput {
-  return { action: 'snapshot', ...(input.scope ? { scope: input.scope } : {}), ...(typeof input.limit === 'number' ? { limit: input.limit } : {}) };
+  const limit = typeof input.limit === 'number' ? Math.max(input.limit, DERIVED_SNAPSHOT_MIN_LIMIT) : undefined;
+  return { action: 'snapshot', ...(input.scope ? { scope: input.scope } : {}), ...(limit === undefined ? {} : { limit }) };
 }
 
 function snapshotCommand(command: BrowserReplPageCommand, input: BrowserInput): BrowserReplPageCommand {
