@@ -43,6 +43,7 @@ type AgentToolOptions = {
   onTargetUnavailable?: (error: string) => Promise<void>;
   runSandbox?: RunSandbox;
   browserJsEnabled?: boolean;
+  profileAccess?: boolean;
 };
 
 export const AGENT_TOOL_SCHEMA_VERSION = 2;
@@ -76,7 +77,7 @@ function browserReplDescription(browserJsEnabled: boolean) {
     'Advanced REPL for operations browser cannot express. ' +
     'Use only for batch actions, complex forms, debugging, or when browser fails. ' +
     'Single expressions return automatically; multi-statement code must return evidence. ' +
-    `Helpers: ${helpers}.${browserJsNote} ` +
+    `Helpers: ${helpers}. All helpers are async. Result shapes: const { elements } = await observe() or query(css); const { text } = await readVisibleText(). Elements are serializable descriptors (name/value/index/selector), not DOM nodes. Pass the element object directly to actions: const {elements}=await query(css); await fill(elements[0], value); never pass a bare numeric index.${browserJsNote} ` +
     'Page reading: readVisibleText(), readLinksAndButtons(), listInteractiveElements(), queryText("text") cover main document, open shadow roots, and same-origin iframes; cross-origin frames show metadata. ' +
     'Element indexes from observe/query are scoped to one call; never reuse across calls. ' +
     'For page changes, use action auto-wait or waitFor; do not use sleep/setTimeout polling. ' +
@@ -106,7 +107,7 @@ export function createAgentTools(options: AgentToolOptions) {
   // Skill freshness loop: after repeated tool failures, point the model back at skills it read this task.
   const staleSkillTracker: StaleSkillTracker = { readSkillPaths: [], consecutiveFailures: 0, hinted: false };
   const withRunLog = createRunLogger(options.sessionId, options.emitEvent, options.taskId, staleSkillTracker);
-  const fsController = createFsController({ sessionId: options.sessionId });
+  const fsController = createFsController({ sessionId: options.sessionId, profileAccess: options.profileAccess });
   const tools = {
     getDocument: tool<GetDocumentInput, GetDocumentResult>({
       description: getDocumentDescription,
@@ -474,8 +475,9 @@ function createRunLogger(sessionId: number, emitEvent: EmitEvent, taskId: string
         const output = await run(input, options.abortSignal);
         const durationMs = elapsedMs(startedAt);
         staleSkillTracker.consecutiveFailures = 0;
-        await appendToolRun({ sessionId, toolName, input, output, durationMs });
-        await emitEvent('tool.completed', { taskId, toolCallId, toolName, input, output, durationMs });
+        const recorded = recordableToolOutput(toolName, input, output);
+        await appendToolRun({ sessionId, toolName, input, output: recorded, durationMs });
+        await emitEvent('tool.completed', { taskId, toolCallId, toolName, input, output: recorded, durationMs });
         return output;
       } catch (error) {
         staleSkillTracker.consecutiveFailures += 1;
@@ -488,6 +490,20 @@ function createRunLogger(sessionId: number, emitEvent: EmitEvent, taskId: string
       }
     };
   };
+}
+
+/**
+ * Audit redaction choke point: the model gets the raw result for the current
+ * call, but recorded tool runs and tool.completed events — which feed the
+ * timeline, session export, compaction, and future-task model context — must
+ * never hold personal profile content, or history would bypass the per-task
+ * profileAccess gate.
+ */
+function recordableToolOutput(toolName: string, input: unknown, output: unknown) {
+  if (toolName !== 'fs' || !isRecord(input)) return output;
+  if (input.action !== 'read' || input.path !== '/profile.md') return output;
+  const contentChars = isRecord(output) && typeof output.contentChars === 'number' ? output.contentChars : undefined;
+  return { action: 'read', path: '/profile.md', ...(contentChars === undefined ? {} : { contentChars }), redacted: true };
 }
 
 function validator<T>(parse: (value: unknown) => T) {

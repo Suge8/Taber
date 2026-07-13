@@ -34,6 +34,7 @@ Dexie               单一本地数据源，保存配置、会话、事件日志
 - Offscreen AgentHost：`entrypoints/offscreen/main.ts`、`lib/agent-instructions.ts`、`lib/agent-tools.ts`
 - Agent 事件投影：`lib/agent-event-projection.ts`、`lib/agent-event-text.ts`、`lib/sidepanel-view.ts`、`lib/model-context.ts`
 - 站点技能与文件工作区：`lib/skills.ts`、`lib/skills-seeds.ts`、`lib/workspace-files.ts`、`lib/fs-tool.ts`、`lib/document-export.ts`、`docs/adr/0015`、0016、0017；target 与激活规则见 ADR 0011、0018、0019
+- 个人资料（填表用，每任务授权的 /profile.md）：`lib/personal-profile.ts`、`ProfilePanel.svelte`、ADR 0021
 - 固定工具：`lib/get-document.ts`、`lib/get-document-page.ts`、`lib/document-markdown.ts`、`lib/extract-image.ts`、`lib/navigate.ts`、`lib/browser-tool.ts`、`lib/browser-repl.ts`、`lib/browser-repl-command.ts`、`lib/browser-repl-evaluation.ts`、`lib/browser-repl-executor.ts`、`lib/browser-repl-page.ts`、`lib/browser-repl-page-runtime.ts`、`lib/browser-repl-page-locator.ts`、`lib/browser-repl-page-introspection.ts`、`lib/browser-repl-code.ts`、`lib/browser-js-page-script.ts`、`lib/browser-repl-visual-page.ts`、`lib/debugger-tool.ts`；模型输入规范化见 ADR 0020
 - 侧边栏 UI：`entrypoints/sidepanel/App.svelte`、`entrypoints/sidepanel/SourcesBar.svelte`、`entrypoints/sidepanel/Timeline.svelte`、`entrypoints/sidepanel/ActivityGroup.svelte`、`lib/sidepanel-i18n.ts`、`lib/components/ai-elements/tool/tool-header.svelte`
 - 官方订阅 UI：`SubscriptionHub.svelte`、`SubscriptionLoginCard.svelte`、`OpenAILogo.svelte`、`GrokLogo.svelte`、`lib/subscription-login.ts`

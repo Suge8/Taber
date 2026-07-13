@@ -9,6 +9,7 @@ import {
   skillFileName,
 } from './skills.ts';
 import { listSessionFiles, mimeTypeForFileName, normalizeFileName, readSessionFile, textMimeTypes, writeSessionFile } from './workspace-files.ts';
+import { readPersonalProfile } from './personal-profile.ts';
 
 export const FS_READ_LIMIT_CHARS = 40_000;
 export const MAX_FS_WRITE_CHARS = 200_000;
@@ -20,7 +21,7 @@ export type FsInput = { action: FsAction; path?: string; content?: string };
 export type FsEntry = { path: string; size?: number; mimeType?: string; description?: string; enabled?: boolean };
 
 export type FsResult =
-  | { action: 'ls'; workspace: FsEntry[]; skills: FsEntry[] }
+  | { action: 'ls'; workspace: FsEntry[]; skills: FsEntry[]; profile?: FsEntry }
   | { action: 'read'; path: string; content: string; contentChars: number; truncated: boolean }
   | { action: 'read'; path: string; binary: true; mimeType: string; size: number; hint: string }
   | { action: 'write'; path: string; size: number; mimeType: string };
@@ -57,23 +58,41 @@ export function parseFsInput(value: unknown): FsInput {
   return { action, path, content };
 }
 
-export function createFsController(options: { sessionId: number }) {
+export function createFsController(options: { sessionId: number; profileAccess?: boolean }) {
   async function run(input: FsInput): Promise<FsResult> {
     if (input.action === 'ls') return list();
     const target = parsePath(input.path!);
     if (input.action === 'read') {
+      if (target.space === 'profile') return readProfile();
       return target.space === 'skills' ? readSkill(target.name) : readWorkspace(target.name);
+    }
+    if (target.space === 'profile') {
+      if (!options.profileAccess) throw profileNotFoundError();
+      throw new Error('/profile.md is read-only. The user maintains it in the extension settings.');
     }
     return target.space === 'skills' ? writeSkill(target.name, input.content!) : writeWorkspace(target.name, input.content!);
   }
 
   async function list(): Promise<FsResult> {
-    const [files, skills] = await Promise.all([listSessionFiles(options.sessionId), listSkills()]);
+    const [files, skills, profile] = await Promise.all([
+      listSessionFiles(options.sessionId),
+      listSkills(),
+      options.profileAccess ? readPersonalProfile() : Promise.resolve(''),
+    ]);
     return {
       action: 'ls',
       workspace: files.map((file) => ({ path: `/workspace/${file.name}`, size: file.size, mimeType: file.mimeType })),
       skills: skills.map((skill) => ({ path: `/skills/${skillFileName(skill)}`, description: skill.description, ...(skill.enabled ? {} : { enabled: false }) })),
+      ...(profile ? { profile: { path: '/profile.md', size: profile.length, description: 'User personal information for form filling (read-only)' } } : {}),
     };
+  }
+
+  // Without task consent the profile file does not exist for the model: no
+  // listing, no read, no error message hinting it could be enabled.
+  async function readProfile(): Promise<FsResult> {
+    const content = options.profileAccess ? await readPersonalProfile() : '';
+    if (!content) throw profileNotFoundError();
+    return { action: 'read', path: '/profile.md', content, contentChars: content.length, truncated: false };
   }
 
   async function readSkill(rawFileName: string): Promise<FsResult> {
@@ -135,10 +154,15 @@ export function createFsController(options: { sessionId: number }) {
   return { run };
 }
 
-function parsePath(path: string): { space: 'workspace' | 'skills'; name: string } {
+function parsePath(path: string): { space: 'workspace' | 'skills' | 'profile'; name: string } {
+  if (path === '/profile.md') return { space: 'profile', name: 'profile.md' };
   const match = /^\/(workspace|skills)\/([^/]+)$/.exec(path);
   if (!match) throw new Error(`Invalid fs path: ${path}. Use /workspace/<name> or /skills/<name>.md`);
   return { space: match[1] as 'workspace' | 'skills', name: match[2] };
+}
+
+function profileNotFoundError() {
+  return new Error('File not found: /profile.md. Use fs ls to see available files.');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

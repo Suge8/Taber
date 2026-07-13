@@ -23,6 +23,12 @@ export const instructionsByLocale: Record<AgentLocale, string> = {
   ].join('\n\n'),
 };
 
+/** Appended only when the user enabled profile access for the task; disabled tasks never learn the file exists. */
+export const profileInstructionsByLocale: Record<AgentLocale, string> = {
+  zh: '## 个人资料\n用户已授权本任务读取个人资料 /profile.md（fs read）。填表或需要用户个人信息时先读取它，不要向用户询问资料里已有的信息。资料只用于完成当前任务：禁止把其中内容提交、复述或泄露到任务目标之外的任何页面或输出；提交含个人资料的敏感表单前仍需确认。',
+  en: "## Personal Profile\nThe user granted this task read access to /profile.md (fs read). Read it before filling forms or whenever you need the user's personal information; do not ask the user for details it already contains. Use it only to complete the current task: never submit, repeat, or leak its content to any page or output beyond the task goal, and still confirm before submitting sensitive forms containing it.",
+};
+
 export function readAgentLocale(value: unknown): AgentLocale {
   return value === 'zh' ? 'zh' : 'en';
 }

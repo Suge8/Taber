@@ -5,6 +5,7 @@ import { createFsController, MAX_FS_WRITE_CHARS, parseFsInput } from '../lib/fs-
 import { docxToText } from '../lib/document-export.ts';
 import { listSkills } from '../lib/skills.ts';
 import { listSessionFiles, readSessionFile, writeSessionFile } from '../lib/workspace-files.ts';
+import { personalProfileSettingKey, setPersonalProfile } from '../lib/personal-profile.ts';
 
 await initializeDatabase();
 const session = await createSession({ title: 'fs test' });
@@ -100,5 +101,26 @@ assert.equal(otherList.action === 'ls' ? otherList.skills.length : -1, 1); // sk
 
 assert.equal((await listSessionFiles(session.id)).length, 3);
 await database.files.where('sessionId').equals(session.id).delete();
+
+// profile gating: without task consent /profile.md does not exist for the model
+await setPersonalProfile('姓名：测试用户\n电话：13800000000');
+const gatedList = await fs.run({ action: 'ls' });
+assert.equal(gatedList.action === 'ls' ? gatedList.profile : null, undefined, 'ls must hide the profile without consent');
+await assert.rejects(fs.run({ action: 'read', path: '/profile.md' }), /File not found: \/profile\.md/);
+await assert.rejects(fs.run({ action: 'write', path: '/profile.md', content: 'x' }), /File not found: \/profile\.md/);
+
+// with consent the profile is listed and readable, but stays read-only
+const profileFs = createFsController({ sessionId: session.id, profileAccess: true });
+const profileList = await profileFs.run({ action: 'ls' });
+assert.equal(profileList.action === 'ls' ? profileList.profile?.path : '', '/profile.md');
+const profileRead = await profileFs.run({ action: 'read', path: '/profile.md' });
+assert.equal(profileRead.action === 'read' && 'content' in profileRead ? profileRead.content : '', '姓名：测试用户\n电话：13800000000');
+await assert.rejects(profileFs.run({ action: 'write', path: '/profile.md', content: 'x' }), /read-only/);
+
+// consent with an empty profile still reads as not found
+await database.settings.delete(personalProfileSettingKey);
+const emptyList = await profileFs.run({ action: 'ls' });
+assert.equal(emptyList.action === 'ls' ? emptyList.profile : null, undefined);
+await assert.rejects(profileFs.run({ action: 'read', path: '/profile.md' }), /File not found: \/profile\.md/);
 
 console.log('test-fs-tool passed');

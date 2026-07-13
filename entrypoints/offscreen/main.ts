@@ -4,6 +4,7 @@ import { isOperableTab } from '../../lib/active-tab';
 import { browserPageScriptConsentKey } from '../../lib/browser-access';
 import { AGENT_HOST_IDLE_TIMEOUT_MS } from '../../lib/agent-host-controller';
 import { parseForegroundMode } from '../../lib/foreground-mode';
+import { parseProfileAccess } from '../../lib/personal-profile';
 import { collectAgentResponseText } from '../../lib/agent-stream';
 import {
   appendAgentEvent,
@@ -22,7 +23,7 @@ import { readSelectedConfiguredModel } from '../../lib/provider-config-flow';
 import { getProviderApiKey, getReasoningEffort, reasoningProviderOptionsForModel } from '../../lib/provider-store';
 import { skillsDigestForTask } from '../../lib/skills';
 import { seedBuiltinSkills } from '../../lib/skills-seeds';
-import { AGENT_INSTRUCTIONS_VERSION, instructionsByLocale, readAgentLocale, type AgentLocale } from '../../lib/agent-instructions';
+import { AGENT_INSTRUCTIONS_VERSION, instructionsByLocale, profileInstructionsByLocale, readAgentLocale, type AgentLocale } from '../../lib/agent-instructions';
 
 type TargetTabContext = { id: number; windowId?: number; title?: string; url?: string; favIconUrl?: string };
 
@@ -85,6 +86,7 @@ async function startTask(message: Record<string, unknown>) {
   if (typeof message.prompt !== 'string' || message.prompt.trim() === '') throw new Error('Task prompt is required');
 
   const foregroundMode = parseForegroundMode(message.foregroundMode);
+  const profileAccess = parseProfileAccess(message.profileAccess);
   clearIdleCloseTimer();
   const prompt = message.prompt.trim();
   const sessionId = await resolveSessionId(message.sessionId, prompt);
@@ -97,8 +99,8 @@ async function startTask(message: Record<string, unknown>) {
 
   showTargetOverlay(targetTab.id);
   void notifyBackground('taber.background.agentActive');
-  await emitAgentEvent(sessionId, 'task.started', { taskId, prompt, foregroundMode, context: targetTab, instructionsVersion: AGENT_INSTRUCTIONS_VERSION });
-  void runAgentTask({ abortController, prompt, sessionId, taskId, foregroundMode, targetTabId: targetTab.id, targetTabUrl: targetTab.url, windowId, locale });
+  await emitAgentEvent(sessionId, 'task.started', { taskId, prompt, foregroundMode, profileAccess, context: targetTab, instructionsVersion: AGENT_INSTRUCTIONS_VERSION });
+  void runAgentTask({ abortController, prompt, sessionId, taskId, foregroundMode, profileAccess, targetTabId: targetTab.id, targetTabUrl: targetTab.url, windowId, locale });
 
   return { sessionId, taskId };
 }
@@ -145,6 +147,7 @@ async function runAgentTask(task: {
   sessionId: number;
   taskId: string;
   foregroundMode: boolean;
+  profileAccess: boolean;
   targetTabId: number;
   targetTabUrl?: string;
   windowId?: number;
@@ -152,9 +155,11 @@ async function runAgentTask(task: {
 }) {
   try {
     const skillsDigest = await skillsDigestForTask(task.targetTabUrl, task.prompt);
-    const instructions = skillsDigest ? `${instructionsByLocale[task.locale]}
-
-${skillsDigest}` : instructionsByLocale[task.locale];
+    const instructions = [
+      instructionsByLocale[task.locale],
+      ...(task.profileAccess ? [profileInstructionsByLocale[task.locale]] : []),
+      ...(skillsDigest ? [skillsDigest] : []),
+    ].join('\n\n');
     const runtime = await createConfiguredRuntime(task, instructions);
     await emitAgentEvent(task.sessionId, 'runtime.configured', { taskId: task.taskId, ...runtime.diagnostics });
     let events = (await readSessionSnapshot(task.sessionId)).agentEvents;
@@ -231,10 +236,10 @@ function clearIdleCloseTimer() {
 }
 
 async function createConfiguredRuntime(
-  task: { sessionId: number; taskId: string; foregroundMode: boolean; windowId?: number; targetTabId: number; targetTabUrl?: string },
+  task: { sessionId: number; taskId: string; foregroundMode: boolean; profileAccess: boolean; windowId?: number; targetTabId: number; targetTabUrl?: string },
   instructions: string,
 ) {
-  const { sessionId, taskId, foregroundMode, windowId, targetTabId, targetTabUrl } = task;
+  const { sessionId, taskId, foregroundMode, profileAccess, windowId, targetTabId, targetTabUrl } = task;
   const modelRecord = await readSelectedModel();
   const [providerRecord, reasoningEffort] = await Promise.all([
     database.providers.get(modelRecord.providerId),
@@ -267,6 +272,7 @@ async function createConfiguredRuntime(
       tools: createAgentTools({
         sessionId,
         foregroundMode,
+        profileAccess,
         taskId,
         windowId,
         targetTabId,

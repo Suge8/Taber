@@ -6,6 +6,7 @@ import { createDebuggerController, debuggerRequestType } from '../lib/debugger-t
 import { captureVisibleTarget, extractImageFromPage, parseExtractImageInput, type ExtractImageInput } from '../lib/extract-image';
 import { extractDocumentFromPage, parseGetDocumentInput } from '../lib/get-document';
 import { parseForegroundMode } from '../lib/foreground-mode';
+import { parseProfileAccess } from '../lib/personal-profile';
 import { createNavigateController, navigateRequestType } from '../lib/navigate';
 import { createOffscreenLifecycle } from '../lib/offscreen-lifecycle';
 import { installBrowserReplPageLocator, runBrowserReplPageRuntimeInjected } from '../lib/browser-repl-page';
@@ -34,7 +35,6 @@ const agentHost = createAgentHostController({
 type BrowserTabLike = { id?: number; active?: boolean; index?: number; windowId?: number; title?: string; url?: string; pendingUrl?: string; favIconUrl?: string; width?: number; height?: number };
 
 const sidepanelPath = 'sidepanel.html';
-const toggleSidePanelCommand = 'toggle-side-panel';
 const sidepanelPorts = new Map<unknown, number | undefined>();
 const scriptingFallbacks = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timeoutId: ReturnType<typeof setTimeout> }>();
 const cancelledPageCommands = new Map<string, ReturnType<typeof setTimeout>>();
@@ -57,10 +57,6 @@ export default defineBackground({
         if (isRecord(message) && message.type === 'taber.sidepanel.window' && Number.isInteger(message.windowId)) sidepanelPorts.set(port, Number(message.windowId));
       });
       port.onDisconnect.addListener(() => sidepanelPorts.delete(port));
-    });
-
-    browser.commands.onCommand.addListener((command, tab) => {
-      if (command === toggleSidePanelCommand) void toggleSidePanel(tab?.windowId);
     });
 
     browser.tabs.onRemoved.addListener((tabId) => notifyTabRemoved(tabId));
@@ -146,36 +142,6 @@ function requireTabId(tab: { id?: number }) {
 function requireWindowId(tab: { windowId?: number }) {
   if (!tab.windowId) throw new Error('No window for target tab');
   return tab.windowId;
-}
-
-async function toggleSidePanel(windowId?: number) {
-  const targetWindowId = windowId ?? (await browser.windows.getCurrent()).id;
-  if (targetWindowId && hasSidePanelInWindow(targetWindowId)) {
-    await closeSidePanel(targetWindowId);
-    return;
-  }
-  if (!targetWindowId) throw new Error('No current window for side panel');
-  await browser.sidePanel.open({ windowId: targetWindowId });
-}
-
-async function closeSidePanel(windowId?: number) {
-  const targetWindowId = windowId ?? (await browser.windows.getCurrent()).id;
-  const sidePanelApi = browser.sidePanel as typeof browser.sidePanel & { close?: (options: { windowId: number }) => Promise<void> };
-  if (targetWindowId && sidePanelApi.close) {
-    await sidePanelApi.close({ windowId: targetWindowId }).catch(() => sendCloseSidePanelMessage(targetWindowId));
-    return;
-  }
-  await sendCloseSidePanelMessage(targetWindowId);
-}
-
-async function sendCloseSidePanelMessage(windowId?: number) {
-  for (const [port, sidepanelWindowId] of sidepanelPorts) {
-    if (windowId === undefined || sidepanelWindowId === windowId) (port as { postMessage(message: unknown): void }).postMessage({ type: 'taber.sidepanel.close' });
-  }
-}
-
-function hasSidePanelInWindow(windowId: number) {
-  return [...sidepanelPorts.values()].includes(windowId);
 }
 
 function notifyTabRemoved(tabId: number) {
@@ -371,7 +337,7 @@ async function startTask(message: Record<string, unknown>) {
   const tab = selectOperableActiveTab(tabs) ?? tabs.find((candidate) => Number.isInteger(candidate.id) && Number(candidate.id) > 0);
   if (!tab) throw new Error('No active tab in the side panel window');
   const targetTab = tabContext(tab);
-  return agentHost.startTask({ prompt: message.prompt, foregroundMode, sessionId: readSessionId(message.sessionId), windowId: targetTab.windowId ?? windowId, targetTabId: targetTab.id, targetTab, locale: readAgentLocale(message.locale) });
+  return agentHost.startTask({ prompt: message.prompt, foregroundMode, profileAccess: parseProfileAccess(message.profileAccess), sessionId: readSessionId(message.sessionId), windowId: targetTab.windowId ?? windowId, targetTabId: targetTab.id, targetTab, locale: readAgentLocale(message.locale) });
 }
 
 function isPrivilegedMessageType(type: string) {
