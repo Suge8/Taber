@@ -4,6 +4,28 @@
   <a href="#english">🇺🇸 English</a> · <a href="#中文">🇨🇳 中文</a>
 </p>
 
+## 0.6.1 - 2026-07-13
+
+### English
+
+#### Fixed
+
+- Browser actions recover from malformed refs when the model also provides one unambiguous semantic locator, preventing repeated `INVALID_TARGET` loops on dynamic iframe pages.
+
+#### Changed
+
+- Browser REPL guidance documents the `{ count, matches, candidates }` result returned by `queryText("text")`.
+
+### 中文
+
+#### 修复
+
+- 模型同时提供唯一可靠的语义定位器时，即使 ref 被污染，浏览器操作也会自动使用语义定位器，避免动态 iframe 页面反复进入 `INVALID_TARGET` 循环。
+
+#### 变更
+
+- Browser REPL 文档补充 `queryText("text")` 返回的 `{ count, matches, candidates }` 结构。
+
 ## 0.6.0 - 2026-07-13
 
 ### English
