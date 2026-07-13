@@ -14,7 +14,18 @@ type Tab = {
 function testParsesRequiredInputs() {
   assert.deepEqual(parseNavigateInput({ action: 'open', url: ' https://example.com ' }), {
     action: 'open',
-    url: ' https://example.com ',
+    url: 'https://example.com',
+  });
+  assert.deepEqual(parseNavigateInput({ action: 'open', url: 'https://example.com', target: 'current', tabId: 1, timeoutMs: 30_000 }), {
+    action: 'open',
+    url: 'https://example.com',
+  });
+  assert.deepEqual(parseNavigateInput({ action: 'listTabs', url: '', target: 'current', tabId: 1, timeoutMs: 10_000 }), {
+    action: 'listTabs',
+  });
+  assert.deepEqual(parseNavigateInput({ action: 'switchTab', url: '', target: 'current', tabId: 7, timeoutMs: 10_000 }), {
+    action: 'switchTab',
+    tabId: 7,
   });
   assert.throws(() => parseNavigateInput({ action: 'open' }), /navigate.open requires url/);
   assert.throws(() => parseNavigateInput({ action: 'switchTab' }), /navigate.switchTab requires tabId/);
@@ -98,10 +109,8 @@ async function testTargetTabOverridesActiveTab() {
   browser.webNavigation.onCompleted.emit({ tabId: 2, frameId: 0, url: 'https://target.example' });
   assert.equal((await pending).tab?.id, 2);
 
-  await assert.rejects(controller.navigate({ action: 'currentTab', tabId: 1 }), /locked to target tab 2/);
-  await assert.rejects(controller.navigate({ action: 'reload', tabId: 1 }), /locked to target tab 2/);
+  assert.equal((await controller.navigate({ action: 'currentTab', tabId: 1 })).tab?.id, 2, 'irrelevant model tabId must not override the target');
   await assert.rejects(controller.navigate({ action: 'closeTab', tabId: 1 }), /locked to target tab 2/);
-  assert.deepEqual(browser.tabs.reloads, []);
 
   const newTab = controller.navigate({ action: 'open', target: 'new', url: 'https://new.example' });
   await flushMicrotasks();
@@ -191,7 +200,7 @@ async function testHistoryCurrentAndCloseActions() {
   browser.tabs.onUpdated.emit(1, { status: 'complete' }, { ...browser.tabs.tabs[0], status: 'complete' });
   assert.equal((await back).action, 'back');
 
-  const forward = controller.navigate({ action: 'forward', tabId: 1 });
+  const forward = controller.navigate({ action: 'forward' });
   await flushMicrotasks();
   assert.deepEqual(browser.tabs.forwardCalls, [1]);
   browser.webNavigation.onCompleted.emit({ tabId: 1, frameId: 0, url: 'https://first.example' });
@@ -215,9 +224,9 @@ async function testAbortedNavigationKeepsWaitingForReplacement() {
 
 async function testNavigationTimeoutUsesEventWaiter() {
   const browser = createFakeBrowser();
-  const controller = createNavigateController(browser);
+  const controller = createNavigateController({ ...browser, navigationTimeoutMs: 100 });
 
-  const pending = controller.navigate({ action: 'reload', timeoutMs: 100 });
+  const pending = controller.navigate({ action: 'reload' });
   await flushMicrotasks();
 
   assert.equal(browser.scheduler.delayMs, 100);
