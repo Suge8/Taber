@@ -445,7 +445,7 @@ async function testExtractImageController() {
     assert.throws(() => parseExtractImageInput({ source: oldSource, selector: 'img' }), new RegExp(`Invalid extractImage source: ${oldSource}`));
   }
   // Unknown keys are ignored (models pad inputs with placeholder fields like selector on viewport).
-  assert.deepEqual(parseExtractImageInput({ source: 'viewport', format: 'jpeg', quality: Number('0.8'), tabId: 8 }), { source: 'viewport', format: 'jpeg', tabId: 8 });
+  assert.deepEqual(parseExtractImageInput({ source: 'viewport', format: 'jpeg', quality: Number('0.8'), tabId: 8 }), { source: 'viewport', format: 'jpeg' });
   assert.deepEqual(parseExtractImageInput({ source: 'viewport', selector: 'body', format: 'png', jpegQuality: 80 }), { source: 'viewport', format: 'png' });
   assert.deepEqual(parseExtractImageInput({ source: 'imageElement', selector: 'img', fullPage: true }), { source: 'imageElement', selector: 'img' });
   assert.throws(() => parseExtractImageInput([]), /extractImage input must be an object/);
