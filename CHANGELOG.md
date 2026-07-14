@@ -4,6 +4,38 @@
   <a href="#english">🇺🇸 English</a> · <a href="#中文">🇨🇳 中文</a>
 </p>
 
+## 0.6.2 - 2026-07-14
+
+### English
+
+#### Fixed
+
+- Agent actions tied to the current tab now run in order, and task event persistence failures stop the task before duplicate page actions can occur.
+- Exported documents no longer load remote resources embedded in workspace HTML.
+- Event timelines retain their causal order even when system clocks move backward.
+
+#### Changed
+
+- Side-panel workspace files refresh only when a relevant file mutation occurs; runtime acceptance now verifies a live file write appears without reloading the panel.
+- Event projection is linear for large session histories, reducing side-panel work as logs grow.
+- The full runtime gate now covers the extension, Browser REPL, and side panel in an isolated build.
+- Added regression coverage for agent instructions, context compaction, and xAI subscription runtime behavior.
+
+### 中文
+
+#### 修复
+
+- 与当前标签页绑定的 Agent 操作现在按顺序执行；任务事件持久化失败会在重复页面操作前终止任务。
+- 导出的文档不再加载工作区 HTML 中嵌入的远程资源。
+- 即使系统时钟回拨，事件时间线也会保持因果顺序。
+
+#### 变更
+
+- 侧边栏工作区文件只在相关文件变更时刷新；运行时验收会验证实时写入无需重新加载侧栏即可显示。
+- 大型会话历史的事件投影改为线性处理，减少日志增长时的侧栏开销。
+- 完整运行时门禁现在在隔离构建中覆盖扩展、Browser REPL 和侧边栏。
+- 新增 Agent 指令、上下文压缩和 xAI 订阅运行时行为的回归覆盖。
+
 ## 0.6.1 - 2026-07-13
 
 ### English
