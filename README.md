@@ -21,11 +21,14 @@
 </p>
 
 <p align="center">
-  <a href="docs/assets/readme/empty-state.webp"><img src="docs/assets/readme/empty-state.webp" width="44%" alt="Taber idle side panel"></a>
-  &nbsp;
-  <a href="docs/assets/readme/task-result.webp"><img src="docs/assets/readme/task-result.webp" width="44%" alt="Taber completed a browser task with inspectable steps"></a>
+  <a href="docs/assets/readme/hero.webp"><img src="docs/assets/readme/hero.webp" width="92%" alt="Taber side panel: a completed price-comparison task with inspectable steps, and a live form-filling task under supervision"></a>
 </p>
-<p align="center"><sub>空闲侧边栏与任务结果 · Idle side panel and completed task</sub></p>
+<p align="center"><sub>已完成的比价任务与运行中的填表任务 · Completed price comparison and a live form-filling task</sub></p>
+
+<p align="center">
+  <img src="docs/assets/readme/demo.gif" width="92%" alt="Live demo: Taber opens Hacker News, reads the page, and answers with the top 3 stories — every step visible in the timeline">
+</p>
+<p align="center"><sub>真实任务录屏：打开 HN、读页面、给出答案 · Real task: open HN, read, answer — fully supervised</sub></p>
 
 <p align="center">
   <a href="docs/assets/readme/site-skills.webp"><img src="docs/assets/readme/site-skills.webp" width="56%" alt="Taber site skills grouped by workflow"></a>
