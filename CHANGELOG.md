@@ -4,6 +4,22 @@
   <a href="#english">🇺🇸 English</a> · <a href="#中文">🇨🇳 中文</a>
 </p>
 
+## Unreleased
+
+### English
+
+#### Fixed
+
+- English count labels now pluralize correctly (“1 source”, “1 step”, “1 tab selected”, and similar).
+- The page-control overlay follows the browser language instead of always showing Chinese.
+
+### 中文
+
+#### 修复
+
+- 英文计数文案现在正确处理单复数（如 “1 source”、“1 step”、“1 tab selected”）。
+- 页面控制指示条文案跟随浏览器语言，不再固定显示中文。
+
 ## 0.6.2 - 2026-07-14
 
 ### English

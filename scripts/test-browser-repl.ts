@@ -252,7 +252,8 @@ async function testOverlayScriptAndPickUserElement() {
     assert.match(root.querySelector('[data-taber-part="edge"]')?.getAttribute('style') ?? '', /0 0 0 2px rgba\(125,144,255,\.60\)/);
     assert.match(root.querySelector('[data-taber-part="glow"]')?.getAttribute('style') ?? '', /linear-gradient\(to bottom/);
     assert.doesNotMatch(root.querySelector('[data-taber-part="glow"]')?.getAttribute('style') ?? '', /radial-gradient/);
-    assert.equal(root.querySelector('[data-taber-part="badge-text"]')?.textContent, 'Taber 正在控制此页');
+    const expectedOverlayText = navigator.language?.toLowerCase().startsWith('zh') ? 'Taber 正在控制此页' : 'Taber is controlling this page';
+    assert.equal(root.querySelector('[data-taber-part="badge-text"]')?.textContent, expectedOverlayText);
     assert.equal(root.querySelector('[data-taber-part="badge-icon-image"]')?.getAttribute('src'), 'chrome-extension://taber/icons/icon-24.png');
     assert.deepEqual(runTaberPageOverlayCommand({ action: 'hide' }), { hidden: true });
     assert.match(root.querySelector('[data-taber-part="edge"]')?.getAttribute('style') ?? '', /opacity:0/);
@@ -261,7 +262,7 @@ async function testOverlayScriptAndPickUserElement() {
     assert.equal(page.document.getElementById('taber-page-control-overlay'), null);
     const scriptResult = await eval(createBrowserReplUserScript({ helper: 'controlOverlay', args: [{ action: 'show' }] }));
     assert.equal(scriptResult.ok, true);
-    assert.equal(page.document.getElementById('taber-page-control-overlay')?.querySelector('[data-taber-part="badge-text"]')?.textContent, 'Taber 正在控制此页');
+    assert.equal(page.document.getElementById('taber-page-control-overlay')?.querySelector('[data-taber-part="badge-text"]')?.textContent, expectedOverlayText);
   });
 
   const pendingPick = runPageValue(page, { helper: 'pickUserElement', args: [{ message: 'Pick target', timeoutMs: 1000 }] });

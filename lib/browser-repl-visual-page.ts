@@ -16,7 +16,7 @@ export function runTaberPageOverlayCommand(command: BrowserReplVisualCommand) {
 
   const key = '__taberBrowserReplVisual';
   const rootId = 'taber-page-control-overlay';
-  const defaultOverlayMessage = 'Taber 正在控制此页';
+  const defaultOverlayMessage = navigator.language?.toLowerCase().startsWith('zh') ? 'Taber 正在控制此页' : 'Taber is controlling this page';
   const runtime = ((globalThis as Record<string, unknown>)[key] as VisualRuntime | undefined) ?? createRuntime();
   (globalThis as Record<string, unknown>)[key] = runtime;
   return runtime.command(command);
