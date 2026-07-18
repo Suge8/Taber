@@ -489,11 +489,52 @@ html.js .doc-outer.in { opacity: 1; }
 .mp-item p { font-size: 0.95rem; line-height: 1.65; color: var(--muted); }
 .mp-item p strong { color: var(--ink); font-weight: 620; }
 
-/* ============ CTA ============ */
-.cta { text-align: center; position: relative; }
-.cta .display { font-size: clamp(2.5rem, 5.5vw, 4.4rem); }
-.cta-sub { margin-top: 1.3rem; color: var(--muted); font-size: 1.08rem; }
-.cta .hero-ctas { justify-content: center; margin-top: 2.6rem; }
+/* ============ 安装 ============ */
+.install-grid { display: grid; grid-template-columns: 0.95fr 1.05fr; gap: clamp(2.5rem, 6vw, 5rem); align-items: center; }
+.install-copy { position: relative; }
+.install-note { margin-top: 1.15rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
+.folder-outer { margin-top: clamp(2rem, 4vw, 3.25rem); width: 178px; will-change: transform; }
+.folder-3d { width: 100%; height: auto; display: block; animation: doc-float 8s ease-in-out -2.2s infinite; }
+.install-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.install-step {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 2px oklch(0.18 0 0 / 0.04), 0 22px 54px -32px oklch(0.18 0 0 / 0.2);
+  transition: transform 0.35s var(--ease-enter), box-shadow 0.35s var(--ease-out);
+}
+.install-step:hover { transform: translateY(-3px); box-shadow: 0 2px 4px oklch(0.18 0 0 / 0.05), 0 30px 64px -34px oklch(0.18 0 0 / 0.28); }
+.step-num {
+  width: 34px; height: 34px; flex: none; border-radius: 50%;
+  background: var(--ink); color: var(--bg);
+  display: grid; place-items: center; font-weight: 650; font-size: 0.95rem; font-variant-numeric: tabular-nums;
+}
+.step-text { flex: 1; min-width: 0; }
+.step-text h3 { font-size: 1.02rem; font-weight: 640; letter-spacing: -0.01em; }
+.step-text p { margin-top: 3px; font-size: 0.9rem; color: var(--muted); line-height: 1.6; }
+.step-vis { flex: none; display: flex; align-items: center; }
+.step-vis-col { flex-direction: column; align-items: flex-end; gap: 8px; }
+.vis-zip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+  border: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; padding: 8px 11px;
+  white-space: nowrap;
+}
+.vis-zip svg { width: 13px; height: 13px; color: var(--ink); }
+.vis-url {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+  border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 6px 12px;
+  white-space: nowrap;
+}
+.vis-toggle { width: 40px; height: 24px; border-radius: 999px; background: var(--ink); position: relative; flex: none; }
+.vis-knob { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); }
+.vis-drop {
+  width: 84px; height: 56px; border: 1.5px dashed oklch(0.78 0 0); border-radius: 14px;
+  display: grid; place-items: center; color: var(--muted); position: relative;
+}
+.vis-drop > svg:last-child { width: 20px; height: 20px; }
+.vis-drop-arr { position: absolute; top: -11px; width: 16px; height: 16px; color: var(--ink); animation: drop-bob 1.7s ease-in-out infinite; }
+@keyframes drop-bob { 0%, 100% { transform: translateY(-2px); } 50% { transform: translateY(3px); } }
 
 /* ============ 页脚 ============ */
 .footer { border-top: 1px solid var(--line); padding: 2.6rem 0 3rem; background: var(--surface); }
@@ -511,10 +552,11 @@ html.js .doc-outer.in { opacity: 1; }
   .hero-grid { grid-template-columns: 1fr; gap: 3.5rem; }
   .sim { margin-inline: auto; }
   .hero-sub { max-width: 40rem; }
-  .ev-grid, .skills-grid { grid-template-columns: 1fr; }
+  .ev-grid, .skills-grid, .install-grid { grid-template-columns: 1fr; }
   .ev-copy { position: static; }
   .skills-shot { margin-inline: auto; order: -1; }
   .hero-cursor { display: none; }
+  .folder-outer { width: 140px; margin-top: 2rem; }
 }
 @media (max-width: 1180px) {
 }
@@ -564,9 +606,9 @@ html.js .doc-outer.in { opacity: 1; }
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
         <span id="langLabel">中文</span>
       </button>
-      <a class="btn btn-primary" href="https://github.com/Suge8/taber" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.17c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
-        <span>GitHub</span>
+      <a class="btn btn-primary" href="#get">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+        <span data-i18n="nav.dl">Download</span>
       </a>
     </div>
   </div>
@@ -584,13 +626,13 @@ html.js .doc-outer.in { opacity: 1; }
         </h1>
         <p class="hero-sub" data-i18n="hero.sub">Give Taber a task in plain words. It reads pages, clicks buttons, fills forms, and hands you the result. Watch every step. Stop it any time.</p>
         <div class="hero-ctas">
-          <a class="btn btn-primary btn-lg" href="https://github.com/Suge8/taber" target="_blank" rel="noopener">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.17c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
-            <span data-i18n="hero.cta1">Star on GitHub</span>
+          <a class="btn btn-primary btn-lg js-dl" href="https://github.com/Suge8/taber/releases/latest" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+            <span data-i18n="hero.cta1">Download Taber</span>
           </a>
-          <a class="btn btn-ghost btn-lg" href="#demo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3" fill="currentColor" stroke="none"/></svg>
-            <span data-i18n="hero.cta2">Watch it work</span>
+          <a class="btn btn-ghost btn-lg" href="https://github.com/Suge8/taber" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.17c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+            <span data-i18n="hero.cta2">GitHub</span>
           </a>
         </div>
       </div>
@@ -757,17 +799,57 @@ html.js .doc-outer.in { opacity: 1; }
     </div>
   </aside>
 
-  <!-- ============ CTA ============ -->
-  <section class="section cta" id="get">
-    <div class="container">
-      <h2 class="display rv" data-i18n-html="cta.title">Open source.<br>Bring your own model.</h2>
-      <p class="cta-sub rv" style="--i:1" data-i18n="cta.sub">Apache-2.0. Free. Works in Chrome and Edge.</p>
-      <div class="hero-ctas rv" style="--i:2">
-        <a class="btn btn-primary btn-lg" href="https://github.com/Suge8/taber" target="_blank" rel="noopener">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.17c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
-          <span data-i18n="cta.button">View on GitHub</span>
-        </a>
+  <!-- ============ 安装 ============ -->
+  <section class="section install" id="get">
+    <div class="container install-grid">
+      <div class="install-copy">
+        <h2 class="sec-title rv" data-i18n="install.title">Up and running in a minute</h2>
+        <p class="sec-lede rv" style="--i:1" data-i18n="install.lede">Download the packed extension and drop it into Chrome. No account, no setup wizard.</p>
+        <div class="rv" style="--i:2; margin-top:2.2rem">
+          <a class="btn btn-primary btn-lg js-dl" href="https://github.com/Suge8/taber/releases/latest" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+            <span data-i18n="install.dl">Download Taber for Chrome</span>
+          </a>
+        </div>
+        <p class="install-note rv" style="--i:3" data-i18n="install.note">Open source, Apache-2.0. To update later, download and replace.</p>
+        <div class="folder-outer" id="folderOuter" aria-hidden="true"><img class="folder-3d" src="assets/folder-3d.webp" alt="" width="560" height="500"></div>
       </div>
+      <ol class="install-steps">
+        <li class="install-step rv" style="--i:1">
+          <span class="step-num">1</span>
+          <div class="step-text">
+            <h3 data-i18n="install.s1t">Download and unzip</h3>
+            <p data-i18n="install.s1d">Grab the latest build and unzip it anywhere.</p>
+          </div>
+          <span class="step-vis" aria-hidden="true">
+            <span class="vis-zip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>taber-chrome-mv3.zip</span>
+          </span>
+        </li>
+        <li class="install-step rv" style="--i:2">
+          <span class="step-num">2</span>
+          <div class="step-text">
+            <h3 data-i18n="install.s2t">Turn on Developer mode</h3>
+            <p data-i18n="install.s2d">Open chrome://extensions and flip the Developer mode switch, top right.</p>
+          </div>
+          <span class="step-vis step-vis-col" aria-hidden="true">
+            <span class="vis-url">chrome://extensions</span>
+            <span class="vis-toggle"><span class="vis-knob"></span></span>
+          </span>
+        </li>
+        <li class="install-step rv" style="--i:3">
+          <span class="step-num">3</span>
+          <div class="step-text">
+            <h3 data-i18n="install.s3t">Drag in the folder</h3>
+            <p data-i18n="install.s3d">Drop the unzipped folder onto the page. Taber shows up in your side panel.</p>
+          </div>
+          <span class="step-vis" aria-hidden="true">
+            <span class="vis-drop">
+              <svg class="vis-drop-arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m7 10 5 5 5-5"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+            </span>
+          </span>
+        </li>
+      </ol>
     </div>
   </section>
 </main>
@@ -797,11 +879,12 @@ html.js .doc-outer.in { opacity: 1; }
     en: {
       'meta.title': 'Taber \u2014 The browser agent you can watch work',
       'nav.evidence': 'Evidence', 'nav.demo': 'Demo', 'nav.skills': 'Skills', 'nav.privacy': 'Privacy',
+      'nav.dl': 'Download',
       'hero.badge': 'Open source \u00b7 Apache-2.0 \u00b7 Chrome & Edge',
       'hero.t1': 'The browser agent',
       'hero.t2': 'you can <span class="mark">watch<svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M2 9 C 30 3, 70 3, 98 8"/></svg></span> work.',
       'hero.sub': 'Give Taber a task in plain words. It reads pages, clicks buttons, fills forms, and hands you the result. Watch every step. Stop it any time.',
-      'hero.cta1': 'Star on GitHub', 'hero.cta2': 'Watch it work',
+      'hero.cta1': 'Download Taber', 'hero.cta2': 'GitHub',
       'sim.tag': 'Live simulation', 'sim.stop': 'Pause simulation',
       'sim.region': 'Live simulation of Taber performing a browser task',
       'sim.working': 'Taber is working', 'sim.done': 'Task completed', 'sim.paused': 'Paused',
@@ -831,20 +914,25 @@ html.js .doc-outer.in { opacity: 1; }
       'mp.p4d': '<strong>The store build skips the debugger permission</strong> and never reads cookies.',
       'hood.label': 'Under the hood',
       'hood.note': 'Six fixed tools, narrow by design. Light and dark themes included, follows your system.',
-      'cta.title': 'Open source.<br>Bring your own model.',
-      'cta.sub': 'Apache-2.0. Free. Works in Chrome and Edge.',
-      'cta.button': 'View on GitHub',
+      'install.title': 'Up and running in a minute',
+      'install.lede': 'Download the packed extension and drop it into Chrome. No account, no setup wizard.',
+      'install.dl': 'Download Taber for Chrome',
+      'install.note': 'Open source, Apache-2.0. To update later, download and replace.',
+      'install.s1t': 'Download and unzip', 'install.s1d': 'Grab the latest build and unzip it anywhere.',
+      'install.s2t': 'Turn on Developer mode', 'install.s2d': 'Open chrome://extensions and flip the Developer mode switch, top right.',
+      'install.s3t': 'Drag in the folder', 'install.s3d': 'Drop the unzipped folder onto the page. Taber shows up in your side panel.',
       'footer.tag': 'A browser agent that acts.',
       'footer.copy': '\u00a9 2025 Taber contributors \u00b7 Sessions, files, and skills never leave your machine.'
     },
     zh: {
       'meta.title': 'Taber \u2014 \u770b\u7740\u5b83\u5e72\u6d3b\u7684\u6d4f\u89c8\u5668 Agent',
       'nav.evidence': '\u8bc1\u636e', 'nav.demo': '\u6f14\u793a', 'nav.skills': '\u6280\u80fd', 'nav.privacy': '\u9690\u79c1',
+      'nav.dl': '\u4e0b\u8f7d',
       'hero.badge': '\u5f00\u6e90 \u00b7 Apache-2.0 \u00b7 Chrome \u4e0e Edge',
       'hero.t1': '\u770b\u7740\u5b83\u628a\u6d3b\u5e72\u5b8c\u7684',
       'hero.t2': '<span class="mark">\u6d4f\u89c8\u5668 Agent<svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M2 9 C 30 3, 70 3, 98 8"/></svg></span>',
       'hero.sub': '\u7528\u4e00\u53e5\u8bdd\u628a\u4efb\u52a1\u4ea4\u7ed9 Taber\uff1a\u5b83\u8bfb\u9875\u9762\u3001\u70b9\u6309\u94ae\u3001\u586b\u8868\u5355\uff0c\u628a\u7ed3\u679c\u4ea4\u5230\u4f60\u624b\u4e0a\u3002\u6bcf\u4e00\u6b65\u90fd\u80fd\u770b\uff0c\u968f\u65f6\u80fd\u505c\u3002',
-      'hero.cta1': '\u5728 GitHub \u4e0a\u52a0\u661f', 'hero.cta2': '\u770b\u5b9e\u62cd\u6f14\u793a',
+      'hero.cta1': '\u4e0b\u8f7d Taber', 'hero.cta2': 'GitHub',
       'sim.tag': '\u5b9e\u65f6\u6a21\u62df', 'sim.stop': '\u6682\u505c\u6a21\u62df',
       'sim.region': 'Taber \u6267\u884c\u6d4f\u89c8\u5668\u4efb\u52a1\u7684\u5b9e\u65f6\u6a21\u62df',
       'sim.working': 'Taber \u6b63\u5728\u5de5\u4f5c', 'sim.done': '\u4efb\u52a1\u5b8c\u6210', 'sim.paused': '\u5df2\u6682\u505c',
@@ -874,9 +962,13 @@ html.js .doc-outer.in { opacity: 1; }
       'mp.p4d': '<strong>\u5546\u5e97\u7248\u4e0d\u7533\u8bf7 debugger \u6743\u9650</strong>\uff0c\u4e5f\u4ece\u4e0d\u8bfb\u53d6 cookie\u3002',
       'hood.label': '\u5e95\u5c42\u4e00\u89c8',
       'hood.note': '\u516d\u4e2a\u56fa\u5b9a\u5de5\u5177\uff0c\u523b\u610f\u6536\u7a84\u624d\u53ef\u4fe1\u3002\u6d45\u8272\u6df1\u8272\u4e3b\u9898\u90fd\u6709\uff0c\u8ddf\u968f\u7cfb\u7edf\u3002',
-      'cta.title': '\u5f00\u6e90\u3002<br>\u81ea\u5e26\u6a21\u578b\u3002',
-      'cta.sub': 'Apache-2.0\uff0c\u514d\u8d39\uff0c\u652f\u6301 Chrome \u548c Edge\u3002',
-      'cta.button': '\u524d\u5f80 GitHub',
+      'install.title': '\u88c5\u4e0a\u5c31\u80fd\u7528',
+      'install.lede': '\u4e0b\u8f7d\u6253\u5305\u597d\u7684\u6269\u5c55\uff0c\u4e09\u6b65\u88c5\u8fdb Chrome\u3002\u4e0d\u7528\u8d26\u53f7\uff0c\u4e0d\u7528\u914d\u7f6e\u73af\u5883\u3002',
+      'install.dl': '\u4e0b\u8f7d Taber for Chrome',
+      'install.note': '\u5f00\u6e90 Apache-2.0\u3002\u4ee5\u540e\u66f4\u65b0\uff0c\u91cd\u65b0\u4e0b\u8f7d\u66ff\u6362\u5373\u53ef\u3002',
+      'install.s1t': '\u4e0b\u8f7d\u5e76\u89e3\u538b', 'install.s1d': '\u62ff\u5230\u6700\u65b0\u6784\u5efa\u5305\uff0c\u89e3\u538b\u5230\u4efb\u610f\u4f4d\u7f6e\u3002',
+      'install.s2t': '\u6253\u5f00\u5f00\u53d1\u8005\u6a21\u5f0f', 'install.s2d': '\u5730\u5740\u680f\u8f93\u5165 chrome://extensions\uff0c\u6253\u5f00\u53f3\u4e0a\u89d2\u7684\u300c\u5f00\u53d1\u8005\u6a21\u5f0f\u300d\u3002',
+      'install.s3t': '\u62d6\u5165\u6587\u4ef6\u5939', 'install.s3d': '\u628a\u89e3\u538b\u51fa\u6765\u7684\u6587\u4ef6\u5939\u62d6\u8fdb\u9875\u9762\uff0cTaber \u5c31\u4f1a\u51fa\u73b0\u5728\u4fa7\u8fb9\u680f\u3002',
       'footer.tag': '\u4f1a\u52a8\u624b\u7684\u6d4f\u89c8\u5668 Agent\u3002',
       'footer.copy': '\u00a9 2025 Taber contributors \u00b7 \u4f1a\u8bdd\u3001\u6587\u4ef6\u4e0e\u6280\u80fd\u4ece\u4e0d\u51fa\u672c\u673a\u3002'
     }
@@ -1334,12 +1426,15 @@ html.js .doc-outer.in { opacity: 1; }
         if (dp < 1) demoFrame.style.transform = 'translateY(' + ((1 - dp) * 42).toFixed(1) + 'px) scale(' + (0.94 + dp * 0.06).toFixed(3) + ')';
         else demoFrame.style.transform = '';
       }
-      /* 3D 文档:随滚动旋转 */
-      if (docOuter) {
-        var qr = docOuter.getBoundingClientRect();
+      /* 3D 对象:随滚动旋转 */
+      var rotEls = [[docOuter, 9], [document.getElementById('folderOuter'), -7]];
+      rotEls.forEach(function (it) {
+        var el = it[0];
+        if (!el) return;
+        var qr = el.getBoundingClientRect();
         var prog = (qr.top + qr.height / 2 - vh / 2) / vh;
-        docOuter.style.transform = 'rotate(' + (prog * 9).toFixed(2) + 'deg)';
-      }
+        el.style.transform = 'rotate(' + (prog * it[1]).toFixed(2) + 'deg)';
+      });
       /* 截图视差 + 微旋转 */
       paras.forEach(function (n) {
         var r = n.getBoundingClientRect();
@@ -1361,6 +1456,19 @@ html.js .doc-outer.in { opacity: 1; }
       else video.pause();
     });
   }, { threshold: 0.25 }).observe(video);
+
+  /* ================= 下载按钮:解析到最新 Release 资产 ================= */
+  (function resolveDownload() {
+    fetch('https://api.github.com/repos/Suge8/taber/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.assets) return;
+        var a = d.assets.find(function (x) { return /chrome-mv3\.zip$/.test(x.name); });
+        if (!a) return;
+        document.querySelectorAll('.js-dl').forEach(function (b) { b.href = a.browser_download_url; });
+      })
+      .catch(function () { /* 保留 releases/latest 兜底 */ });
+  })();
 
   /* ================= 启动 ==================== */
   applyI18n();

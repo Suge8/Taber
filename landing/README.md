@@ -27,7 +27,12 @@ cd landing && python3 -m http.server 8765
 5. 站点技能(截图 + 透明 3D 文档 + 内置 API 捷径)
 6. 模型与隐私(BYOM + 本地低权限)
 7. Under the hood 一行流(六个固定工具 + 主题说明,刻意低调)
-8. CTA + 页脚
+8. 安装引导(下载按钮直连最新 Release 的 chrome-mv3.zip,三步装载教学 + 3D 文件夹)
+9. 页脚
+
+## 下载链路
+
+所有 `.js-dl` 下载按钮默认指向 `releases/latest`,页面加载后调用 GitHub API 解析到最新 Release 的 `chrome-mv3.zip` 直链(失败时保留兜底)。无需随发版改页面。
 
 ## 滚动编排
 
