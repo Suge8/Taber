@@ -43,6 +43,7 @@ Dexie               单一本地数据源，保存配置、会话、事件日志
 - 浏览器 OAuth 公共件：`lib/oauth-browser.ts`（PKCE / tab 截获 / token 交换）
 - ChatGPT 订阅：`lib/codex-oauth.ts`、`lib/codex-auth.ts`、`lib/codex-provider.ts`、`lib/codex-runtime.ts`
 - xAI 订阅：`lib/xai-oauth.ts`、`lib/xai-auth.ts`、`lib/xai-provider.ts`、`lib/xai-runtime.ts`
+- Landing page（双语营销页，零构建静态站点，详见 `landing/README.md`）：`landing/`
 
 ## 验证
 

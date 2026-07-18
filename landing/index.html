@@ -1,0 +1,1373 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taber — The browser agent you can watch work</title>
+<meta name="description" content="Give Taber a task in plain words. It reads pages, clicks buttons, fills forms, and hands you the result. Watch every step. Stop it any time. Open source.">
+<meta property="og:title" content="Taber — The browser agent you can watch work">
+<meta property="og:description" content="Reads pages, clicks buttons, fills forms, and finishes web tasks. Every step logged, stoppable any time.">
+<meta property="og:image" content="assets/og.webp">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Taber — The browser agent you can watch work">
+<meta name="twitter:description" content="Reads pages, clicks buttons, fills forms, and finishes web tasks. Every step logged, stoppable any time.">
+<meta name="twitter:image" content="assets/og.webp">
+<meta name="theme-color" content="#fafafa">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="preload" href="assets/fonts/geist-sans-vf.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/geist-mono-vf.woff2" as="font" type="font/woff2" crossorigin>
+<script>
+/* 首帧前确定语言，避免文案闪烁 */
+try {
+  var __l = localStorage.getItem('taber-lang');
+  if (!__l) __l = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+  document.documentElement.dataset.lang = __l;
+  document.documentElement.lang = __l === 'zh' ? 'zh-CN' : 'en';
+} catch (e) { document.documentElement.dataset.lang = 'en'; }
+document.documentElement.classList.add('js');
+</script>
+<style>
+/* ============ 字体 ============ */
+@font-face {
+  font-family: "Geist Sans";
+  src: url("assets/fonts/geist-sans-vf.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("assets/fonts/geist-mono-vf.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+
+/* ============ Token（与产品 app.css 同源） ============ */
+:root {
+  --bg: oklch(0.985 0 0);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.965 0 0);
+  --ink: oklch(0.18 0 0);
+  --muted: oklch(0.52 0 0);
+  --line: oklch(0.9 0 0);
+  --ok: oklch(0.48 0.1 150);
+  --ok-soft: oklch(0.95 0.03 150);
+  --d-bg: oklch(0.13 0 0);
+  --d-surface: oklch(0.17 0 0);
+  --d-surface-2: oklch(0.22 0 0);
+  --d-ink: oklch(0.96 0 0);
+  --d-muted: oklch(0.68 0 0);
+  --d-line: oklch(0.31 0 0);
+  --d-ok: oklch(0.85 0.09 150);
+  --font-sans: "Geist Sans", "SF Pro Display", "Helvetica Neue", system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", "PingFang SC", monospace;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --r: 10px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --nav-h: 64px;
+}
+
+/* ============ 基础 ============ */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  opacity: 0;
+}
+html.ready body { opacity: 1; transition: opacity 0.25s var(--ease-out); }
+::selection { background: var(--ink); color: var(--bg); }
+img, video { display: block; max-width: 100%; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 4px; }
+.tabnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+.container { max-width: 1200px; margin-inline: auto; padding-inline: clamp(1.25rem, 4vw, 2.5rem); }
+section { scroll-margin-top: calc(var(--nav-h) + 16px); }
+
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+
+/* ============ 圆点网格（品牌 motif，来自 readme-hero) ============ */
+.dots {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: radial-gradient(circle, oklch(0.88 0 0) 1.1px, transparent 1.1px);
+  background-size: 26px 26px;
+  mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 92%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 92%);
+  will-change: transform;
+}
+
+/* ============ 导航 ============ */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+  height: var(--nav-h);
+  display: flex; align-items: center;
+  transition: background 0.3s var(--ease-out), border-color 0.3s var(--ease-out), backdrop-filter 0.3s;
+  border-bottom: 1px solid transparent;
+}
+.nav.scrolled {
+  background: oklch(0.985 0 0 / 0.82);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom-color: var(--line);
+}
+.nav-inner { display: flex; align-items: center; gap: 1.5rem; width: 100%; max-width: 1200px; margin-inline: auto; padding-inline: clamp(1.25rem, 4vw, 2.5rem); }
+.nav-brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 650; font-size: 1.06rem; letter-spacing: -0.01em; margin-right: auto; }
+.nav-brand img { width: 28px; height: 28px; border-radius: 7px; }
+.nav-links { display: flex; gap: 1.35rem; font-size: 0.92rem; color: var(--muted); }
+.nav-links a { position: relative; padding: 4px 0; transition: color 0.2s; }
+.nav-links a::after {
+  content: ""; position: absolute; left: 0; right: 100%; bottom: 0; height: 1.5px;
+  background: var(--ink); transition: right 0.28s var(--ease-enter);
+}
+.nav-links a:hover { color: var(--ink); }
+.nav-links a:hover::after { right: 0; }
+.nav-right { display: flex; align-items: center; gap: 0.6rem; }
+
+.lang-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface);
+  font-size: 0.85rem; font-weight: 550; letter-spacing: 0.01em;
+  transition: border-color 0.2s, transform 0.15s var(--ease-out);
+}
+.lang-toggle:hover { border-color: var(--ink); }
+.lang-toggle:active { transform: scale(0.95); }
+.lang-toggle svg { width: 14px; height: 14px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 40px; padding: 0 20px; border-radius: 999px;
+  font-size: 0.93rem; font-weight: 580; letter-spacing: -0.005em; white-space: nowrap;
+  transition: transform 0.16s var(--ease-out), background 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.btn:active { transform: scale(0.96); }
+.btn-primary { background: var(--ink); color: var(--bg); }
+.btn-primary:hover { background: oklch(0.3 0 0); box-shadow: 0 8px 24px -12px oklch(0.18 0 0 / 0.5); }
+.btn-ghost { border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.btn-ghost:hover { border-color: var(--ink); }
+.btn svg { width: 16px; height: 16px; }
+.btn-lg { height: 52px; padding: 0 28px; font-size: 1.02rem; }
+.btn-lg svg { width: 18px; height: 18px; }
+.nav .btn { height: 36px; padding: 0 16px; font-size: 0.88rem; }
+
+/* ============ Hero ============ */
+.hero { padding: calc(var(--nav-h) + clamp(3rem, 7vh, 5.5rem)) 0 clamp(3.5rem, 7vw, 5.5rem); }
+.hero-grid { display: grid; grid-template-columns: 1.12fr 0.88fr; gap: clamp(2rem, 4vw, 3.5rem); align-items: center; }
+
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.02em; color: var(--muted);
+  border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 14px 6px 10px;
+  margin-bottom: 1.75rem;
+}
+.hero-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.hero-badge .dot.pulse { animation: breathe 2.2s ease-in-out infinite; }
+
+.display {
+  font-size: clamp(2.7rem, 5vw, 4.05rem);
+  font-weight: 680; line-height: 1.06; letter-spacing: -0.04em;
+}
+html[data-lang="zh"] .display { letter-spacing: -0.015em; font-weight: 700; line-height: 1.12; }
+.display .hl { display: block; overflow: hidden; padding-bottom: 0.17em; margin-bottom: -0.17em; }
+.display .hl > span { display: inline-block; will-change: transform; }
+html.js:not(.ready) .display .hl > span { transform: translateY(115%); }
+html.ready .display .hl > span { animation: hl-up 0.9s var(--ease-enter) both; animation-delay: calc(0.08s + var(--i) * 0.09s); }
+@keyframes hl-up { from { transform: translateY(115%); } to { transform: translateY(0); } }
+
+.mark { position: relative; white-space: nowrap; }
+.mark > svg { position: absolute; left: -2%; bottom: -0.07em; width: 104%; height: 0.24em; overflow: visible; }
+.mark > svg path {
+  fill: none; stroke: var(--ok); stroke-width: 4.5; stroke-linecap: round; opacity: 0.55;
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+}
+html.ready .mark > svg path { animation: draw 0.7s var(--ease-enter) 0.85s forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+
+.hero-sub {
+  margin-top: 1.6rem; font-size: clamp(1.05rem, 1.4vw, 1.2rem); line-height: 1.7;
+  color: var(--muted); max-width: 34rem; text-wrap: pretty;
+}
+.hero-ctas { margin-top: 2.4rem; display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; }
+html.js:not(.ready) .hero-sub, html.js:not(.ready) .hero-ctas, html.js:not(.ready) .hero-badge { opacity: 0; }
+html.ready .hero-sub, html.ready .hero-ctas, html.ready .hero-badge {
+  animation: fade-up 0.8s var(--ease-enter) both;
+}
+html.ready .hero-badge { animation-delay: 0.02s; }
+html.ready .hero-sub { animation-delay: 0.45s; }
+html.ready .hero-ctas { animation-delay: 0.58s; }
+@keyframes fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* ============ 实时模拟器（签名视觉） ============ */
+.sim-wrap { position: relative; }
+html.js:not(.ready) .sim-wrap { opacity: 0; transform: translateY(28px); }
+html.ready .sim-wrap { animation: sim-in 1s var(--ease-enter) 0.35s both; }
+@keyframes sim-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+
+.sim {
+  position: relative; max-width: 430px; margin-left: auto;
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px oklch(0.18 0 0 / 0.04), 0 24px 64px -32px oklch(0.18 0 0 / 0.22);
+  overflow: hidden;
+}
+.sim-tag {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 3;
+  font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--muted); background: var(--surface); border: 1px solid var(--line);
+  padding: 3px 10px; border-radius: 999px; display: flex; align-items: center; gap: 6px;
+}
+.sim-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: breathe 2.2s ease-in-out infinite; }
+.sim-top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+}
+.sim-iconbtn {
+  width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line);
+  display: grid; place-items: center; color: var(--ink); background: var(--surface);
+}
+.sim-iconbtn svg { width: 16px; height: 16px; }
+.sim-scroll {
+  height: 460px; overflow-y: auto; position: relative;
+  padding: 4px 14px 14px;
+  display: flex; flex-direction: column; gap: 12px;
+  scrollbar-width: none; -ms-overflow-style: none;
+  mask-image: linear-gradient(to bottom, transparent 0, black 14px, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 14px, black 100%);
+}
+.sim-scroll::-webkit-scrollbar { display: none; }
+.sim-task {
+  background: var(--surface-2); border-radius: var(--r-lg);
+  padding: 12px 16px; font-size: 0.92rem; line-height: 1.55; font-weight: 500;
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
+}
+.sim-group {
+  border: 1px solid var(--line); border-radius: 20px; overflow: hidden;
+  background: var(--surface);
+  transition: border-color 0.4s, opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
+}
+.sim-group.done { border-color: oklch(0.76 0.105 160); }
+.sim-group-head {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  font-size: 0.9rem; font-weight: 600;
+}
+.sim-cluster { display: flex; }
+.sim-cluster span {
+  width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2);
+  border: 1.5px solid var(--surface); display: grid; place-items: center; color: var(--muted);
+  margin-left: -7px;
+}
+.sim-cluster span:first-child { margin-left: 0; }
+.sim-cluster span svg { width: 13px; height: 13px; }
+.sim-group-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.3s; }
+.sim-group.done .sim-group-title { color: var(--ok); }
+.sim-chip {
+  font-size: 0.72rem; font-weight: 550; color: var(--muted);
+  background: var(--surface-2); border-radius: 999px; padding: 3px 9px;
+  font-variant-numeric: tabular-nums;
+}
+.sim-timer { font-size: 0.85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.sim-chev { width: 15px; height: 15px; color: var(--muted); }
+.sim-steps { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 10px; }
+.sim-step {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 14px; padding: 9px 12px;
+  font-size: 0.86rem; background: var(--surface);
+  transition: opacity 0.35s var(--ease-out), transform 0.35s var(--ease-out);
+}
+.sim-step.enter { opacity: 0; transform: translateY(10px); }
+.sim-step-icon {
+  width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--surface-2);
+  display: grid; place-items: center; color: var(--ink);
+}
+.sim-step-icon svg { width: 14px; height: 14px; }
+.sim-step-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.sim-step-state { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 0.8rem; font-weight: 550; }
+.sim-step.finished .sim-step-state { color: var(--ok); }
+.sim-spinner {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 1.8px solid var(--line); border-top-color: var(--ink);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.sim-check { width: 14px; height: 14px; }
+.sim-check path { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.sim-step.finished .sim-check path { animation: draw 0.4s var(--ease-enter) forwards; }
+.sim-answer { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; line-height: 1.6; padding: 2px 4px; }
+.sim-answer .a-line { transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out); }
+.sim-answer .a-line.enter { opacity: 0; transform: translateY(8px); }
+.sim-answer .a-strong { font-weight: 650; }
+.sim-sources {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line); border-radius: 14px; padding: 9px 13px;
+  font-size: 0.8rem; color: var(--muted); background: var(--surface);
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
+}
+.sim-sources.enter { opacity: 0; transform: translateY(8px); }
+.sim-sources svg { width: 14px; height: 14px; flex: none; }
+.sim-sources .src-n { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sim-scroll.fading .sim-task, .sim-scroll.fading .sim-group, .sim-scroll.fading .sim-answer .a-line, .sim-scroll.fading .sim-sources {
+  opacity: 0; transform: translateY(-12px);
+}
+.sim-statusbar {
+  display: flex; align-items: center; gap: 10px;
+  border-top: 1px solid var(--line); padding: 12px 16px;
+  background: var(--surface);
+}
+.sim-statusicon {
+  width: 32px; height: 32px; border-radius: 50%; background: var(--surface-2);
+  display: grid; place-items: center; color: var(--ink); position: relative; flex: none;
+}
+.sim-statusicon svg { width: 15px; height: 15px; }
+.sim-statusicon::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 1.5px solid var(--ink); opacity: 0;
+}
+.sim.run .sim-statusicon::after { animation: ring 2s var(--ease-out) infinite; }
+@keyframes ring { 0% { transform: scale(0.8); opacity: 0.5; } 70% { transform: scale(1.15); opacity: 0; } 100% { opacity: 0; } }
+.sim-statustext { flex: 1; font-size: 0.92rem; font-weight: 600; }
+.sim-stop {
+  width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line);
+  display: grid; place-items: center; background: var(--surface);
+  transition: border-color 0.2s, transform 0.15s var(--ease-out), background 0.2s;
+}
+.sim-stop:hover { border-color: var(--ink); }
+.sim-stop:active { transform: scale(0.92); }
+.sim-stop .sq { width: 12px; height: 12px; border-radius: 3px; background: var(--ink); transition: border-radius 0.2s, background 0.2s; }
+.sim-stop .pl { width: 0; height: 0; border-left: 11px solid var(--ink); border-top: 7px solid transparent; border-bottom: 7px solid transparent; margin-left: 2px; display: none; }
+.sim.paused .sim-stop .sq { display: none; }
+.sim.paused .sim-stop .pl { display: block; }
+.sim.paused .sim-spinner { animation-play-state: paused; }
+.sim.paused .sim-statusicon::after { animation: none; opacity: 0; }
+.sim-statusicon .ok-badge { display: none; }
+.sim.finished-task .sim-statusicon .ok-badge { display: grid; }
+.sim:not(.finished-task) .sim-statusicon .work-badge { display: grid; }
+.sim.finished-task .sim-statusicon .work-badge { display: none; }
+.sim-statusicon span { display: grid; place-items: center; }
+.sim-statusicon .ok-badge { color: var(--ok); }
+
+@keyframes breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* ============ 任务跑马灯 ============ */
+.marquee {
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  overflow: hidden; padding: 15px 0; background: var(--surface);
+  position: relative;
+}
+.marquee-track { display: flex; width: max-content; animation: mq 46s linear infinite; }
+.marquee:hover .marquee-track { animation-play-state: paused; }
+@keyframes mq { to { transform: translateX(-50%); } }
+.mq-item {
+  display: flex; align-items: center; gap: 12px; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 0.86rem; color: var(--muted); letter-spacing: 0.01em;
+  padding-right: 3rem;
+}
+.mq-item::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--line); flex: none; }
+
+/* ============ 区段通用 ============ */
+.section { padding: clamp(5rem, 10vw, 8.5rem) 0; position: relative; }
+.sec-title { font-size: clamp(2.05rem, 4.2vw, 3.3rem); font-weight: 660; line-height: 1.08; letter-spacing: -0.032em; }
+html[data-lang="zh"] .sec-title { letter-spacing: -0.01em; font-weight: 700; line-height: 1.16; }
+.sec-lede { margin-top: 1.15rem; font-size: clamp(1.02rem, 1.3vw, 1.15rem); color: var(--muted); line-height: 1.75; max-width: 36rem; text-wrap: pretty; }
+
+/* 滚动 reveal（只增强，不依赖） */
+html.js .rv { opacity: 0; transform: translateY(22px); filter: blur(5px); transition: opacity 0.8s var(--ease-enter), transform 0.8s var(--ease-enter), filter 0.8s var(--ease-enter); transition-delay: calc(min(var(--i, 0), 5) * 70ms); }
+html.js .rv.in { opacity: 1; transform: none; filter: none; }
+
+/* ============ 证据区 ============ */
+.ev-grid { display: grid; grid-template-columns: 0.95fr 1.05fr; gap: clamp(2.5rem, 6vw, 5rem); align-items: start; }
+.ev-copy { position: sticky; top: calc(var(--nav-h) + 40px); }
+.ev-points { margin-top: 2.6rem; display: flex; flex-direction: column; }
+.ev-point { display: flex; gap: 14px; padding: 1.15rem 0; border-top: 1px solid var(--line); }
+.ev-point:last-child { border-bottom: 1px solid var(--line); }
+.ev-point svg { width: 19px; height: 19px; flex: none; margin-top: 3px; color: var(--ok); }
+.ev-point h3 { font-size: 1.02rem; font-weight: 640; letter-spacing: -0.01em; }
+.ev-point p { margin-top: 4px; font-size: 0.93rem; color: var(--muted); line-height: 1.65; }
+.ev-shots { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1rem, 2.5vw, 1.75rem); align-items: start; }
+.shot {
+  border-radius: 22px; border: 1px solid var(--line); overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 1px 2px oklch(0.18 0 0 / 0.04), 0 28px 70px -36px oklch(0.18 0 0 / 0.28);
+}
+.shot img { width: 100%; height: auto; }
+.ev-shots .shot:nth-child(2) { margin-top: clamp(2.5rem, 5vw, 4.5rem); }
+.shot-cap { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); padding: 10px 14px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+
+/* ============ 悬浮元素(Hero) ============ */
+.hero-cursor-outer {
+  position: absolute; left: -118px; bottom: -78px; z-index: 0; pointer-events: none;
+  will-change: transform;
+}
+.hero-cursor {
+  width: 235px; height: auto; display: block;
+  animation: cursor-float 7s ease-in-out infinite;
+}
+@keyframes cursor-float {
+  0%, 100% { transform: translateY(0) rotate(-5deg); }
+  50% { transform: translateY(-12px) rotate(-2deg); }
+}
+html.js:not(.ready) .hero-cursor-outer { opacity: 0; }
+html.ready .hero-cursor-outer { animation: cursor-in 1.1s var(--ease-enter) 0.6s both; }
+@keyframes cursor-in { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 3D 倾斜容器 */
+.sim-wrap { perspective: 1400px; }
+.sim-tilt { position: relative; transform-style: preserve-3d; will-change: transform; }
+
+/* 滚动效果目标 */
+.demo-frame, .ev-shots .shot, .skills-shot .shot { will-change: transform; }
+.doc-outer { position: absolute; left: -84px; bottom: -46px; z-index: 2; pointer-events: none; will-change: transform; }
+.doc-3d { width: 200px; height: auto; display: block; animation: doc-float 8s ease-in-out infinite; }
+@keyframes doc-float {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50% { transform: translateY(-11px) rotate(-3deg); }
+}
+html.js .doc-outer { opacity: 0; transition: opacity 0.9s var(--ease-enter); }
+html.js .doc-outer.in { opacity: 1; }
+
+/* ============ 底层一览 ============ */
+.hood { border-top: 1px solid var(--line); padding: 2rem 0; }
+.hood-inner { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem 1.4rem; font-family: var(--font-mono); font-size: 0.8rem; }
+.hood-label { color: var(--ink); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; font-size: 0.72rem; }
+.hood-tools { color: var(--ink); }
+.hood-note { color: var(--muted); }
+
+/* ============ 演示视频 ============ */
+.demo-head { text-align: center; max-width: 44rem; margin-inline: auto; }
+.demo-head .sec-lede { margin-inline: auto; }
+.demo-frame {
+  margin: clamp(2.5rem, 5vw, 4rem) auto 0; max-width: 960px;
+  border-radius: var(--r-xl); border: 1px solid var(--line); overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 1px 2px oklch(0.18 0 0 / 0.04), 0 40px 90px -44px oklch(0.18 0 0 / 0.35);
+}
+.demo-bar { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.demo-dots { display: flex; gap: 6px; }
+.demo-dots span { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface-2); }
+.demo-url {
+  flex: 1; max-width: 380px; margin-inline: auto; display: flex; align-items: center; gap: 7px;
+  background: var(--surface-2); border-radius: 999px; padding: 5px 14px;
+  font-family: var(--font-mono); font-size: 0.76rem; color: var(--muted);
+}
+.demo-url svg { width: 12px; height: 12px; flex: none; }
+.demo-frame video { width: 100%; height: auto; aspect-ratio: 1490 / 894; background: var(--d-bg); }
+
+/* ============ 技能区 ============ */
+.skills-grid { display: grid; grid-template-columns: 1.02fr 0.98fr; gap: clamp(2.5rem, 6vw, 5rem); align-items: center; }
+.chips { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 9px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
+  padding: 8px 16px; font-size: 0.88rem; font-weight: 550;
+  transition: transform 0.2s var(--ease-enter), border-color 0.2s, box-shadow 0.2s;
+}
+.chip:hover { transform: translateY(-2px); border-color: var(--ink); box-shadow: 0 8px 20px -12px oklch(0.18 0 0 / 0.35); }
+.chip svg { width: 13px; height: 13px; color: var(--ok); }
+.skills-shot { max-width: 420px; position: relative; }
+.skills-shot .shot { transform: rotate(1.2deg); transition: transform 0.5s var(--ease-enter); }
+.skills-shot:hover .shot { transform: rotate(0deg); }
+
+/* ============ 模型与隐私 ============ */
+.mp-grid { margin-top: clamp(2.5rem, 5vw, 3.75rem); display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 5vw, 4rem); }
+.mp-col h3 { display: flex; align-items: center; gap: 10px; font-size: 1.08rem; font-weight: 640; letter-spacing: -0.01em; margin-bottom: 1.4rem; }
+.mp-col h3 svg { width: 19px; height: 19px; color: var(--ok); }
+.mp-list { display: flex; flex-direction: column; }
+.mp-item { display: flex; gap: 13px; padding: 1.05rem 0; border-top: 1px solid var(--line); align-items: flex-start; }
+.mp-item:last-child { border-bottom: 1px solid var(--line); }
+.mp-item svg { width: 17px; height: 17px; flex: none; margin-top: 4px; color: var(--muted); }
+.mp-item p { font-size: 0.95rem; line-height: 1.65; color: var(--muted); }
+.mp-item p strong { color: var(--ink); font-weight: 620; }
+
+/* ============ CTA ============ */
+.cta { text-align: center; position: relative; }
+.cta .display { font-size: clamp(2.5rem, 5.5vw, 4.4rem); }
+.cta-sub { margin-top: 1.3rem; color: var(--muted); font-size: 1.08rem; }
+.cta .hero-ctas { justify-content: center; margin-top: 2.6rem; }
+
+/* ============ 页脚 ============ */
+.footer { border-top: 1px solid var(--line); padding: 2.6rem 0 3rem; background: var(--surface); }
+.footer-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 2rem; }
+.footer-brand { display: flex; align-items: center; gap: 10px; font-weight: 620; }
+.footer-brand img { width: 26px; height: 26px; border-radius: 6px; }
+.footer-tag { color: var(--muted); font-size: 0.9rem; margin-right: auto; }
+.footer-links { display: flex; gap: 1.4rem; font-size: 0.88rem; color: var(--muted); }
+.footer-links a { transition: color 0.2s; }
+.footer-links a:hover { color: var(--ink); }
+.footer-copy { width: 100%; font-size: 0.8rem; color: var(--muted); font-family: var(--font-mono); }
+
+/* ============ 响应式 ============ */
+@media (max-width: 1020px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 3.5rem; }
+  .sim { margin-inline: auto; }
+  .hero-sub { max-width: 40rem; }
+  .ev-grid, .skills-grid { grid-template-columns: 1fr; }
+  .ev-copy { position: static; }
+  .skills-shot { margin-inline: auto; order: -1; }
+  .hero-cursor { display: none; }
+}
+@media (max-width: 1180px) {
+}
+@media (max-width: 860px) {
+  .nav-links { display: none; }
+  .mp-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .display { font-size: clamp(2.35rem, 10.5vw, 3rem); }
+  .ev-shots { grid-template-columns: 1fr; }
+  .ev-shots .shot:nth-child(2) { margin-top: 0; }
+  .sim-scroll { height: 440px; }
+  .hero-ctas .btn-lg { width: 100%; }
+  .footer-tag { width: 100%; }
+}
+
+/* ============ 减弱动效 ============ */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  html.js .rv { opacity: 1; transform: none; filter: none; }
+  html.js:not(.ready) .display .hl > span { transform: none; }
+  html.js:not(.ready) .hero-sub, html.js:not(.ready) .hero-ctas, html.js:not(.ready) .hero-badge, html.js:not(.ready) .sim-wrap, html.js:not(.ready) .hero-cursor-outer { opacity: 1; transform: none; }
+  .mark > svg path { stroke-dashoffset: 0; }
+  .marquee-track { animation: none; flex-wrap: wrap; width: auto; }
+  .sim-step.enter, .sim-answer .a-line.enter, .sim-sources.enter { opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+<div class="dots" id="dots" aria-hidden="true"></div>
+
+<header class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="nav-brand" href="#top" aria-label="Taber">
+      <img src="assets/logo.webp" alt="" width="56" height="56">
+      <span>Taber</span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#demo" data-i18n="nav.demo">Demo</a>
+      <a href="#evidence" data-i18n="nav.evidence">Evidence</a>
+      <a href="#skills" data-i18n="nav.skills">Skills</a>
+      <a href="#privacy" data-i18n="nav.privacy">Privacy</a>
+    </nav>
+    <div class="nav-right">
+      <button class="lang-toggle" id="langToggle" aria-label="Switch language / 切换语言">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+        <span id="langLabel">中文</span>
+      </button>
+      <a class="btn btn-primary" href="https://github.com/Suge8/taber" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.17c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        <span>GitHub</span>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="container hero-grid">
+      <div class="hero-copy" id="heroCopy">
+        <span class="hero-badge"><span class="dot pulse"></span><span data-i18n="hero.badge">Open source · Apache-2.0 · Chrome &amp; Edge</span></span>
+        <h1 class="display" id="heroTitle">
+          <span class="hl" style="--i:0"><span data-i18n-html="hero.t1">The browser agent</span></span>
+          <span class="hl" style="--i:1"><span data-i18n-html="hero.t2">you can <span class="mark">watch<svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M2 9 C 30 3, 70 3, 98 8"/></svg></span> work.</span></span>
+        </h1>
+        <p class="hero-sub" data-i18n="hero.sub">Give Taber a task in plain words. It reads pages, clicks buttons, fills forms, and hands you the result. Watch every step. Stop it any time.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary btn-lg" href="https://github.com/Suge8/taber" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.17c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+            <span data-i18n="hero.cta1">Star on GitHub</span>
+          </a>
+          <a class="btn btn-ghost btn-lg" href="#demo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3" fill="currentColor" stroke="none"/></svg>
+            <span data-i18n="hero.cta2">Watch it work</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- 实时模拟器 -->
+      <div class="sim-wrap" id="simWrap">
+       <div class="sim-tilt" id="simTilt">
+        <div class="hero-cursor-outer" id="cursorOuter"><img class="hero-cursor" src="assets/cursor-3d.webp" alt="" width="600" height="600" aria-hidden="true"></div>
+        <div class="sim run" id="sim" role="region" data-i18n-aria="sim.region" aria-label="Live simulation of Taber performing a browser task">
+          <span class="sim-tag"><span class="dot"></span><span data-i18n="sim.tag">Live simulation</span></span>
+          <div class="sim-top">
+            <span class="sim-iconbtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="4" y1="7" x2="13" y2="7"/><line x1="17" y1="7" x2="20" y2="7"/><circle cx="15" cy="7" r="2"/><line x1="4" y1="17" x2="7" y2="17"/><line x1="11" y1="17" x2="20" y2="17"/><circle cx="9" cy="17" r="2"/></svg></span>
+            <span class="sim-iconbtn" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+          </div>
+          <div class="sim-scroll" id="simScroll">
+            <div class="sim-task" id="simTask"></div>
+            <div class="sim-group" id="simGroup">
+              <div class="sim-group-head">
+                <span class="sim-cluster" id="simCluster"></span>
+                <span class="sim-group-title" id="simTitle"></span>
+                <span class="sim-chip tabnum" id="simChip"></span>
+                <span class="sim-timer tabnum" id="simTimer">0s</span>
+                <svg class="sim-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg>
+              </div>
+              <div class="sim-steps" id="simSteps"></div>
+            </div>
+            <div class="sim-answer" id="simAnswer"></div>
+            <div class="sim-sources" id="simSources" style="display:none"></div>
+          </div>
+          <div class="sim-statusbar">
+            <span class="sim-statusicon" aria-hidden="true">
+              <span class="work-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.1 12 6"/><path d="m5.1 8-2.9-.8"/><path d="m6 12-1.9 2"/><path d="M7.2 2.2 8 5.1"/><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"/></svg></span>
+              <span class="ok-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+            </span>
+            <span class="sim-statustext" id="simStatus">Taber is working</span>
+            <button class="sim-stop" id="simStop" data-i18n-aria="sim.stop" aria-label="Pause simulation">
+              <span class="sq"></span><span class="pl"></span>
+            </button>
+          </div>
+        </div>
+       </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 任务跑马灯 ============ -->
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track" id="mqTrack"></div>
+  </div>
+
+  <!-- ============ 演示视频 ============ -->
+  <section class="section" id="demo">
+    <div class="container">
+      <div class="demo-head">
+        <h2 class="sec-title rv" data-i18n="demo.title">Watch a real task, start to finish</h2>
+        <p class="sec-lede rv" style="--i:1" data-i18n="demo.sub">No mockups. Taber’s actual side panel, collecting today’s top Hacker News.</p>
+      </div>
+      <div class="demo-frame rv" style="--i:2">
+        <div class="demo-bar">
+          <span class="demo-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span class="demo-url"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>news.ycombinator.com</span>
+        </div>
+        <video id="demoVideo" src="assets/demo-hn.mp4" poster="assets/demo-poster.webp" muted loop playsinline preload="none" width="1490" height="894"></video>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 证据区 ============ -->
+  <section class="section" id="evidence">
+    <div class="container ev-grid">
+      <div class="ev-copy">
+        <h2 class="sec-title rv" data-i18n="ev.title">Every step is evidence</h2>
+        <p class="sec-lede rv" style="--i:1" data-i18n="ev.lede">Each click, read, and page jump lands in one timeline. Expand any step, stop the task at any second, and review the whole run afterwards.</p>
+        <div class="ev-points">
+          <div class="ev-point rv" style="--i:2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 13l3-3 4 4 5-6"/></svg>
+            <div><h3 data-i18n="ev.p1t">Inspectable timeline</h3><p data-i18n="ev.p1d">Plans, tool calls, results, and errors, in order and saved across sessions.</p></div>
+          </div>
+          <div class="ev-point rv" style="--i:3">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+            <div><h3 data-i18n="ev.p2t">Stop and resume, always</h3><p data-i18n="ev.p2d">A real stop button on every task. You stay in charge.</p></div>
+          </div>
+          <div class="ev-point rv" style="--i:4">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <div><h3 data-i18n="ev.p3t">No black box</h3><p data-i18n="ev.p3d">You see the final answer plus the tool evidence behind it. Nothing hides.</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="ev-shots">
+        <figure class="shot rv" style="--i:1; margin:0">
+          <img src="assets/shots/running-expanded-light.webp" alt="Taber side panel mid-task: an expanded tool timeline showing each step finishing in order" width="880" height="1800" loading="lazy" data-i18n-alt="ev.shot1alt">
+          <figcaption class="shot-cap"><span>running · 7 steps</span><span class="tabnum">28s</span></figcaption>
+        </figure>
+        <figure class="shot rv" style="--i:2; margin:0" data-para="0.05">
+          <img src="assets/shots/timeline-expanded-light.webp" alt="A completed price-comparison task with every tool call marked Done" width="880" height="1800" loading="lazy" data-i18n-alt="ev.shot2alt">
+          <figcaption class="shot-cap"><span>completed · 10 steps</span><span class="tabnum">38s</span></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 技能区 ============ -->
+  <section class="section" id="skills" style="padding-top:0">
+    <div class="container skills-grid">
+      <div>
+        <h2 class="sec-title rv" data-i18n="skills.title">Faster every time you use it</h2>
+        <p class="sec-lede rv" style="--i:1" data-i18n="skills.lede">When Taber finishes a flow on a site, it saves the know-how as a local skill. Next visit, it skips the trial and error.</p>
+        <p class="rv" style="--i:2; margin-top:2rem; font-family:var(--font-mono); font-size:0.8rem; color:var(--muted)" data-i18n="skills.seed">Starts with API shortcuts for eight sites:</p>
+        <div class="chips">
+          <span class="chip rv" style="--i:2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Hacker News</span>
+          <span class="chip rv" style="--i:2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Reddit</span>
+          <span class="chip rv" style="--i:3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>GitHub</span>
+          <span class="chip rv" style="--i:3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Wikipedia</span>
+          <span class="chip rv" style="--i:3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Stack Exchange</span>
+          <span class="chip rv" style="--i:4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>npm</span>
+          <span class="chip rv" style="--i:4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>PyPI</span>
+          <span class="chip rv" style="--i:4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>arXiv</span>
+        </div>
+      </div>
+      <div class="skills-shot rv" style="--i:2">
+        <div class="doc-outer" id="docOuter"><img class="doc-3d" src="assets/doc-3d.webp" alt="" width="512" height="640" aria-hidden="true"></div>
+        <figure class="shot" style="margin:0">
+          <img src="assets/shots/skills-light.webp" alt="The Skills panel: categories of site know-how learned by Taber, each with a toggle" width="880" height="1800" loading="lazy" data-i18n-alt="skills.shotalt">
+          <figcaption class="shot-cap"><span>/skills</span><span class="tabnum">21 saved</span></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 模型与隐私 ============ -->
+  <section class="section" id="privacy" style="padding-top:0">
+    <div class="container">
+      <h2 class="sec-title rv" data-i18n="mp.title">Your model. Your machine.</h2>
+      <p class="sec-lede rv" style="--i:1" data-i18n="mp.lede">Taber talks only to the model provider you pick. Everything else stays on your computer.</p>
+      <div class="mp-grid">
+        <div class="mp-col rv" style="--i:2">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/><path d="M4 10h-2M4 14h-2M22 10h-2M22 14h-2M10 4V2M14 4V2M10 22v-2M14 22v-2"/></svg><span data-i18n="mp.mh">Bring your own model</span></h3>
+          <div class="mp-list">
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L19 3m-4 0 3 3"/></svg><p><strong>OpenAI API key.</strong> <span data-i18n="mp.m1d">Your key, your usage.</span></p></div>
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg><p><strong data-i18n="mp.m2t">Any OpenAI-compatible endpoint.</strong> <span data-i18n="mp.m2d">Self-hosted or third party. Your baseURL, your rules.</span></p></div>
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg><p><strong>ChatGPT / Codex.</strong> <span data-i18n="mp.m3d">Sign in with the subscription you already pay for.</span></p></div>
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></svg><p><strong>xAI / Grok.</strong> <span data-i18n="mp.m4d">Subscription sign-in. Same task loop, your pick.</span></p></div>
+          </div>
+        </div>
+        <div class="mp-col rv" style="--i:3">
+          <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg><span data-i18n="mp.ph">Local and least-privilege</span></h3>
+          <div class="mp-list">
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg><p data-i18n-html="mp.p1d"><strong>Sessions, credentials, files and skills</strong> stay in the extension’s local database. Nothing syncs away.</p></div>
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg><p data-i18n-html="mp.p2d"><strong>Site access is optional.</strong> You grant it per site during onboarding.</p></div>
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg><p data-i18n-html="mp.p3d"><strong>Page content goes only to your model provider.</strong> Nothing else leaves your machine.</p></div>
+            <div class="mp-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><p data-i18n-html="mp.p4d"><strong>The store build requests no debugger permission</strong> and never reads cookies.</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 底层一览(精简) ============ -->
+  <aside class="hood" id="tools">
+    <div class="container hood-inner rv">
+      <span class="hood-label" data-i18n="hood.label">Under the hood</span>
+      <span class="hood-tools">getDocument · extractImage · navigate · browser · browserRepl · fs</span>
+      <span class="hood-note" data-i18n="hood.note">Six fixed tools, narrow by design. Light and dark themes included, follows your system.</span>
+    </div>
+  </aside>
+
+  <!-- ============ CTA ============ -->
+  <section class="section cta" id="get">
+    <div class="container">
+      <h2 class="display rv" data-i18n-html="cta.title">Open source.<br>Bring your own model.</h2>
+      <p class="cta-sub rv" style="--i:1" data-i18n="cta.sub">Apache-2.0. Free. Works in Chrome and Edge.</p>
+      <div class="hero-ctas rv" style="--i:2">
+        <a class="btn btn-primary btn-lg" href="https://github.com/Suge8/taber" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.17c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12v3.14c0 .3.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+          <span data-i18n="cta.button">View on GitHub</span>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="container footer-inner">
+    <span class="footer-brand"><img src="assets/logo.webp" alt="" width="52" height="52">Taber</span>
+    <span class="footer-tag" data-i18n="footer.tag">A browser agent that acts.</span>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="https://github.com/Suge8/taber" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Suge8/taber/issues" target="_blank" rel="noopener">Issues</a>
+      <a href="https://github.com/Suge8/taber/releases" target="_blank" rel="noopener">Releases</a>
+      <a href="https://github.com/Suge8/taber/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
+    </nav>
+    <span class="footer-copy" data-i18n-html="footer.copy">© 2025 Taber contributors · Sessions, files and skills never leave your machine.</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var html = document.documentElement;
+
+  /* ================= i18n ================= */
+  var I18N = {
+    en: {
+      'meta.title': 'Taber \u2014 The browser agent you can watch work',
+      'nav.evidence': 'Evidence', 'nav.demo': 'Demo', 'nav.skills': 'Skills', 'nav.privacy': 'Privacy',
+      'hero.badge': 'Open source \u00b7 Apache-2.0 \u00b7 Chrome & Edge',
+      'hero.t1': 'The browser agent',
+      'hero.t2': 'you can <span class="mark">watch<svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M2 9 C 30 3, 70 3, 98 8"/></svg></span> work.',
+      'hero.sub': 'Give Taber a task in plain words. It reads pages, clicks buttons, fills forms, and hands you the result. Watch every step. Stop it any time.',
+      'hero.cta1': 'Star on GitHub', 'hero.cta2': 'Watch it work',
+      'sim.tag': 'Live simulation', 'sim.stop': 'Pause simulation',
+      'sim.region': 'Live simulation of Taber performing a browser task',
+      'sim.working': 'Taber is working', 'sim.done': 'Task completed', 'sim.paused': 'Paused',
+      'demo.title': 'Watch a real task, start to finish',
+      'demo.sub': 'No mockups. Taber\u2019s actual side panel, collecting today\u2019s top Hacker News.',
+      'ev.title': 'Every step is evidence',
+      'ev.lede': 'Each click, read, and page jump lands in one timeline. Expand any step, stop the task at any second, and review the whole run afterwards.',
+      'ev.p1t': 'Inspectable timeline', 'ev.p1d': 'Plans, tool calls, results, and errors, in order and saved across sessions.',
+      'ev.p2t': 'Stop and resume, always', 'ev.p2d': 'A real stop button on every task. You stay in charge.',
+      'ev.p3t': 'No black box', 'ev.p3d': 'You see the final answer plus the tool evidence behind it. Nothing hides.',
+      'ev.shot1alt': 'Taber side panel mid-task: an expanded tool timeline showing each step finishing in order',
+      'ev.shot2alt': 'A completed price-comparison task with every tool call marked Done',
+      'skills.title': 'Faster every time you use it',
+      'skills.lede': 'When Taber finishes a flow on a site, it saves the know-how as a local skill. Next visit, it skips the trial and error.',
+      'skills.seed': 'Starts with API shortcuts for eight sites:',
+      'skills.shotalt': 'The Skills panel: categories of site know-how learned by Taber, each with a toggle',
+      'mp.title': 'Your model. Your machine.',
+      'mp.lede': 'Taber talks only to the model provider you pick. Everything else stays on your computer.',
+      'mp.mh': 'Bring your own model', 'mp.ph': 'Local and least-privilege',
+      'mp.m1d': 'Your key, your usage.',
+      'mp.m2t': 'Any OpenAI-compatible endpoint.', 'mp.m2d': 'Self-hosted or third party. Your baseURL, your rules.',
+      'mp.m3d': 'Sign in with the subscription you already pay for.',
+      'mp.m4d': 'Subscription sign-in. Same task loop, your pick.',
+      'mp.p1d': '<strong>Sessions, credentials, files, and skills</strong> stay in the extension\u2019s local database. Nothing syncs away.',
+      'mp.p2d': '<strong>Site access is optional.</strong> You grant it per site during onboarding.',
+      'mp.p3d': '<strong>Page content goes only to your model provider.</strong> Nothing else leaves the machine.',
+      'mp.p4d': '<strong>The store build skips the debugger permission</strong> and never reads cookies.',
+      'hood.label': 'Under the hood',
+      'hood.note': 'Six fixed tools, narrow by design. Light and dark themes included, follows your system.',
+      'cta.title': 'Open source.<br>Bring your own model.',
+      'cta.sub': 'Apache-2.0. Free. Works in Chrome and Edge.',
+      'cta.button': 'View on GitHub',
+      'footer.tag': 'A browser agent that acts.',
+      'footer.copy': '\u00a9 2025 Taber contributors \u00b7 Sessions, files, and skills never leave your machine.'
+    },
+    zh: {
+      'meta.title': 'Taber \u2014 \u770b\u7740\u5b83\u5e72\u6d3b\u7684\u6d4f\u89c8\u5668 Agent',
+      'nav.evidence': '\u8bc1\u636e', 'nav.demo': '\u6f14\u793a', 'nav.skills': '\u6280\u80fd', 'nav.privacy': '\u9690\u79c1',
+      'hero.badge': '\u5f00\u6e90 \u00b7 Apache-2.0 \u00b7 Chrome \u4e0e Edge',
+      'hero.t1': '\u770b\u7740\u5b83\u628a\u6d3b\u5e72\u5b8c\u7684',
+      'hero.t2': '<span class="mark">\u6d4f\u89c8\u5668 Agent<svg viewBox="0 0 100 12" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M2 9 C 30 3, 70 3, 98 8"/></svg></span>',
+      'hero.sub': '\u7528\u4e00\u53e5\u8bdd\u628a\u4efb\u52a1\u4ea4\u7ed9 Taber\uff1a\u5b83\u8bfb\u9875\u9762\u3001\u70b9\u6309\u94ae\u3001\u586b\u8868\u5355\uff0c\u628a\u7ed3\u679c\u4ea4\u5230\u4f60\u624b\u4e0a\u3002\u6bcf\u4e00\u6b65\u90fd\u80fd\u770b\uff0c\u968f\u65f6\u80fd\u505c\u3002',
+      'hero.cta1': '\u5728 GitHub \u4e0a\u52a0\u661f', 'hero.cta2': '\u770b\u5b9e\u62cd\u6f14\u793a',
+      'sim.tag': '\u5b9e\u65f6\u6a21\u62df', 'sim.stop': '\u6682\u505c\u6a21\u62df',
+      'sim.region': 'Taber \u6267\u884c\u6d4f\u89c8\u5668\u4efb\u52a1\u7684\u5b9e\u65f6\u6a21\u62df',
+      'sim.working': 'Taber \u6b63\u5728\u5de5\u4f5c', 'sim.done': '\u4efb\u52a1\u5b8c\u6210', 'sim.paused': '\u5df2\u6682\u505c',
+      'demo.title': '\u770b\u4e00\u6b21\u771f\u5b9e\u4efb\u52a1\u7684\u5168\u7a0b',
+      'demo.sub': '\u4e0d\u662f\u6548\u679c\u56fe\u3002\u8fd9\u662f Taber \u771f\u5b9e\u7684\u4fa7\u8fb9\u680f\u5728\u6536\u96c6 HN \u4eca\u65e5\u699c\u5355\u3002',
+      'ev.title': '\u6bcf\u4e00\u6b65\u90fd\u662f\u8bc1\u636e',
+      'ev.lede': '\u6bcf\u6b21\u70b9\u51fb\u3001\u8bfb\u53d6\u548c\u8df3\u8f6c\u90fd\u4f1a\u8fdb\u5165\u540c\u4e00\u6761\u65f6\u95f4\u7ebf\u3002\u968f\u65f6\u5c55\u5f00\u4efb\u4f55\u4e00\u6b65\uff0c\u968f\u65f6\u505c\u4e0b\u4efb\u52a1\uff0c\u4e8b\u540e\u9010\u6b65\u590d\u76d8\u3002',
+      'ev.p1t': '\u53ef\u5c55\u5f00\u7684\u65f6\u95f4\u7ebf', 'ev.p1d': '\u8ba1\u5212\u3001\u5de5\u5177\u8c03\u7528\u3001\u7ed3\u679c\u548c\u9519\u8bef\uff0c\u6309\u5e8f\u6392\u5217\uff0c\u8de8\u4f1a\u8bdd\u4fdd\u5b58\u3002',
+      'ev.p2t': '\u968f\u65f6\u505c\u6b62\u4e0e\u6062\u590d', 'ev.p2d': '\u6bcf\u4e2a\u4efb\u52a1\u90fd\u6709\u771f\u7684\u505c\u6b62\u6309\u94ae\uff0c\u4e3b\u52a8\u6743\u4e00\u76f4\u5728\u4f60\u624b\u91cc\u3002',
+      'ev.p3t': '\u6ca1\u6709\u9ed1\u76d2', 'ev.p3d': '\u4f60\u770b\u5230\u7684\u662f\u6700\u7ec8\u7b54\u6848\u548c\u5b83\u80cc\u540e\u7684\u5de5\u5177\u8bc1\u636e\uff0c\u6ca1\u6709\u9690\u85cf\u3002',
+      'ev.shot1alt': 'Taber \u4fa7\u8fb9\u680f\u4efb\u52a1\u8fdb\u884c\u4e2d\uff1a\u5c55\u5f00\u7684\u5de5\u5177\u65f6\u95f4\u7ebf\u6309\u5e8f\u5b8c\u6210\u6bcf\u4e00\u6b65',
+      'ev.shot2alt': '\u5df2\u5b8c\u6210\u7684\u6bd4\u4ef7\u4efb\u52a1\uff0c\u6bcf\u4e2a\u5de5\u5177\u8c03\u7528\u90fd\u6807\u8bb0\u4e3a\u5b8c\u6210',
+      'skills.title': '\u8d8a\u7528\u8d8a\u5feb',
+      'skills.lede': 'Taber \u5728\u67d0\u4e2a\u7f51\u7ad9\u8dd1\u901a\u6d41\u7a0b\u540e\uff0c\u4f1a\u628a\u7ecf\u9a8c\u5b58\u6210\u672c\u5730\u6280\u80fd\u3002\u4e0b\u6b21\u518d\u53bb\uff0c\u76f4\u63a5\u8df3\u8fc7\u8bd5\u9519\u3002',
+      'skills.seed': '\u5185\u7f6e\u516b\u4e2a\u7ad9\u70b9\u7684 API \u6377\u5f84\uff1a',
+      'skills.shotalt': '\u6280\u80fd\u9762\u677f\uff1aTaber \u5b66\u5230\u7684\u7ad9\u70b9\u7ecf\u9a8c\u5206\u7c7b\uff0c\u6bcf\u9879\u53ef\u5f00\u5173',
+      'mp.title': '\u6a21\u578b\u4f60\u9009\uff0c\u6570\u636e\u4e0d\u51fa\u673a\u3002',
+      'mp.lede': 'Taber \u53ea\u548c\u4f60\u9009\u7684\u6a21\u578b\u4f9b\u5e94\u5546\u901a\u4fe1\uff0c\u5176\u4ed6\u4e00\u5207\u7559\u5728\u4f60\u81ea\u5df1\u7684\u7535\u8111\u4e0a\u3002',
+      'mp.mh': '\u81ea\u5e26\u6a21\u578b', 'mp.ph': '\u672c\u5730\u4e0e\u4f4e\u6743\u9650',
+      'mp.m1d': '\u4f60\u7684 key\uff0c\u4f60\u7684\u989d\u5ea6\u3002',
+      'mp.m2t': '\u4efb\u610f OpenAI \u517c\u5bb9\u7aef\u70b9\u3002', 'mp.m2d': '\u81ea\u6258\u7ba1\u6216\u7b2c\u4e09\u65b9\u3002\u4f60\u7684 baseURL\uff0c\u4f60\u7684\u89c4\u5219\u3002',
+      'mp.m3d': '\u7528\u4f60\u5df2\u7ecf\u5728\u4ed8\u8d39\u7684\u8ba2\u9605\u76f4\u63a5\u767b\u5f55\u3002',
+      'mp.m4d': '\u8ba2\u9605\u76f4\u8fde\u3002\u540c\u4e00\u5957\u4efb\u52a1\u5faa\u73af\uff0c\u968f\u4f60\u9009\u3002',
+      'mp.p1d': '<strong>\u4f1a\u8bdd\u3001\u51ed\u8bc1\u3001\u6587\u4ef6\u548c\u6280\u80fd</strong>\u90fd\u5b58\u5728\u6269\u5c55\u7684\u672c\u5730\u6570\u636e\u5e93\uff0c\u4e0d\u540c\u6b65\u5230\u4efb\u4f55\u4e91\u7aef\u3002',
+      'mp.p2d': '<strong>\u7ad9\u70b9\u8bbf\u95ee\u6309\u9700\u6388\u6743</strong>\uff0c\u7531\u4f60\u5728\u5f15\u5bfc\u6d41\u7a0b\u4e2d\u9010\u7ad9\u70b9\u6388\u4e88\u3002',
+      'mp.p3d': '<strong>\u9875\u9762\u5185\u5bb9\u53ea\u53d1\u7ed9\u4f60\u7684\u6a21\u578b\u4f9b\u5e94\u5546</strong>\uff0c\u9664\u6b64\u4e4b\u5916\u4e0d\u51fa\u672c\u673a\u3002',
+      'mp.p4d': '<strong>\u5546\u5e97\u7248\u4e0d\u7533\u8bf7 debugger \u6743\u9650</strong>\uff0c\u4e5f\u4ece\u4e0d\u8bfb\u53d6 cookie\u3002',
+      'hood.label': '\u5e95\u5c42\u4e00\u89c8',
+      'hood.note': '\u516d\u4e2a\u56fa\u5b9a\u5de5\u5177\uff0c\u523b\u610f\u6536\u7a84\u624d\u53ef\u4fe1\u3002\u6d45\u8272\u6df1\u8272\u4e3b\u9898\u90fd\u6709\uff0c\u8ddf\u968f\u7cfb\u7edf\u3002',
+      'cta.title': '\u5f00\u6e90\u3002<br>\u81ea\u5e26\u6a21\u578b\u3002',
+      'cta.sub': 'Apache-2.0\uff0c\u514d\u8d39\uff0c\u652f\u6301 Chrome \u548c Edge\u3002',
+      'cta.button': '\u524d\u5f80 GitHub',
+      'footer.tag': '\u4f1a\u52a8\u624b\u7684\u6d4f\u89c8\u5668 Agent\u3002',
+      'footer.copy': '\u00a9 2025 Taber contributors \u00b7 \u4f1a\u8bdd\u3001\u6587\u4ef6\u4e0e\u6280\u80fd\u4ece\u4e0d\u51fa\u672c\u673a\u3002'
+    }
+  };
+
+  /* 示例任务（跑马灯） */
+  var MQ = {
+    en: ['Summarize this page into summary.md', 'Compare pricing across these three tabs', 'Turn this PDF into a Word report', 'Top 10 on Hacker News, with links', 'Fill the signup form, stop before submit', 'Extract the tables from this documentation'],
+    zh: ['总结这个页面，存成 summary.md', '对比这三个标签页里的套餐价格', '把这份 PDF 整理成 Word 报告', '抓 HN 今日前 10 条，带链接', '填好注册表单——提交前停下', '把这篇文档的表格提取成 CSV']
+  };
+
+  /* 模拟器任务 */
+  var TASKS = {
+    en: [
+      {
+        user: 'Get today\u2019s top 10 Hacker News posts with titles and links',
+        steps: [
+          { icon: 'nav', label: 'Open news.ycombinator.com', t: 1500 },
+          { icon: 'read', label: 'Read news.ycombinator.com', t: 1800 },
+          { icon: 'click', label: 'Click \u201ccomments\u201d', t: 1100 },
+          { icon: 'read', label: 'Read discussion thread', t: 1600 },
+          { icon: 'write', label: 'Write /workspace/hn-top10.md', t: 1400 }
+        ],
+        answer: [
+          { strong: true, text: 'Saved hn-top10.md: top 10 posts, with titles, links and comment counts.' },
+          { text: 'Leader: 412 points · 238 comments. Ask me to dig into any thread.' }
+        ],
+        sources: 1, src: 'news.ycombinator.com'
+      },
+      {
+        user: 'Find the best price for the Sony WH-1000XM5 and tell me where to buy today',
+        steps: [
+          { icon: 'nav', label: 'Open google.com', t: 1300 },
+          { icon: 'read', label: 'Read google.com', t: 1600 },
+          { icon: 'nav', label: 'Open amazon.com', t: 1200 },
+          { icon: 'read', label: 'Read amazon.com', t: 1700 },
+          { icon: 'click', label: 'Click \u201cBest Buy\u201d', t: 1000 },
+          { icon: 'read', label: 'Read bestbuy.com', t: 1500 }
+        ],
+        answer: [
+          { strong: true, text: 'Best deal: $328 at Amazon, 18% under list, arrives tomorrow.' },
+          { text: 'Best Buy: $349, free store pickup today' },
+          { text: 'Sony Direct: $399 list, bundles a 2-year warranty' }
+        ],
+        sources: 4, src: 'google.com'
+      },
+      {
+        user: 'Register me for the AI Builders Summit with my profile details',
+        steps: [
+          { icon: 'nav', label: 'Open eventbrite.com', t: 1400 },
+          { icon: 'read', label: 'Read eventbrite.com', t: 1500 },
+          { icon: 'click', label: 'Click \u201cRegister\u201d', t: 1100 },
+          { icon: 'fill', label: 'Fill \u201cFull name\u201d', t: 1200 },
+          { icon: 'fill', label: 'Fill \u201cEmail\u201d', t: 1200 },
+          { icon: 'fill', label: 'Fill \u201cOrganization\u201d', t: 1200 }
+        ],
+        answer: [
+          { strong: true, text: 'Filled 6 fields from your profile.' },
+          { text: 'Stopped before submit. Review, then tell me to finish.' }
+        ],
+        sources: 1, src: 'eventbrite.com'
+      }
+    ],
+    zh: [
+      {
+        user: '抓 HN 今日前 10 条，给我标题和链接',
+        steps: [
+          { icon: 'nav', label: '打开 news.ycombinator.com', t: 1500 },
+          { icon: 'read', label: '读取 news.ycombinator.com', t: 1800 },
+          { icon: 'click', label: '点击"comments"', t: 1100 },
+          { icon: 'read', label: '读取讨论串', t: 1600 },
+          { icon: 'write', label: '写入 /workspace/hn-top10.md', t: 1400 }
+        ],
+        answer: [
+          { strong: true, text: '已保存 hn-top10.md——前 10 条，含标题、链接和评论数。' },
+          { text: '榜首 412 分 · 238 条评论。想深入哪条随时说。' }
+        ],
+        sources: 1, src: 'news.ycombinator.com'
+      },
+      {
+        user: '找 Sony WH-1000XM5 的最低价，告诉我今天去哪买',
+        steps: [
+          { icon: 'nav', label: '打开 google.com', t: 1300 },
+          { icon: 'read', label: '读取 google.com', t: 1600 },
+          { icon: 'nav', label: '打开 amazon.com', t: 1200 },
+          { icon: 'read', label: '读取 amazon.com', t: 1700 },
+          { icon: 'click', label: '点击"Best Buy"', t: 1000 },
+          { icon: 'read', label: '读取 bestbuy.com', t: 1500 }
+        ],
+        answer: [
+          { strong: true, text: '最低：Amazon $328——比标价低 18%，明天送达。' },
+          { text: 'Best Buy——$349，今日门店免费自取' },
+          { text: 'Sony 官网——$399 标价，含 2 年延保' }
+        ],
+        sources: 4, src: 'google.com'
+      },
+      {
+        user: '用我的资料帮我报名 AI Builders Summit',
+        steps: [
+          { icon: 'nav', label: '打开 eventbrite.com', t: 1400 },
+          { icon: 'read', label: '读取 eventbrite.com', t: 1500 },
+          { icon: 'click', label: '点击"Register"', t: 1100 },
+          { icon: 'fill', label: '填写"姓名"', t: 1200 },
+          { icon: 'fill', label: '填写"邮箱"', t: 1200 },
+          { icon: 'fill', label: '填写"公司/组织"', t: 1200 }
+        ],
+        answer: [
+          { strong: true, text: '已按你的资料填好 6 个字段。' },
+          { text: '提交前停下了——你确认后我再完成。' }
+        ],
+        sources: 1, src: 'eventbrite.com'
+      }
+    ]
+  };
+
+  var ICONS = {
+    nav: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>',
+    read: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+    click: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.1 12 6"/><path d="m5.1 8-2.9-.8"/><path d="m6 12-1.9 2"/><path d="M7.2 2.2 8 5.1"/><path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z"/></svg>',
+    fill: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    write: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m10 13 2 2 4-4"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>'
+  };
+
+  function t(key) {
+    var lang = html.dataset.lang === 'zh' ? 'zh' : 'en';
+    return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+  }
+
+  function applyI18n() {
+    var lang = html.dataset.lang === 'zh' ? 'zh' : 'en';
+    html.lang = lang === 'zh' ? 'zh-CN' : 'en';
+    document.title = t('meta.title');
+    document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll('[data-i18n-html]').forEach(function (el) { el.innerHTML = t(el.dataset.i18nHtml); });
+    document.querySelectorAll('[data-i18n-aria]').forEach(function (el) { el.setAttribute('aria-label', t(el.dataset.i18nAria)); });
+    document.querySelectorAll('[data-i18n-alt]').forEach(function (el) { el.setAttribute('alt', t(el.dataset.i18nAlt)); });
+    document.getElementById('langLabel').textContent = lang === 'zh' ? 'EN' : '中文';
+    buildMarquee();
+  }
+
+  /* ================= 跑马灯 ================= */
+  function buildMarquee() {
+    var lang = html.dataset.lang === 'zh' ? 'zh' : 'en';
+    var items = MQ[lang];
+    var half = items.map(function (s) { return '<span class="mq-item">' + s + '</span>'; }).join('');
+    document.getElementById('mqTrack').innerHTML = half + half;
+  }
+
+  /* ================= 实时模拟器 ================= */
+  var sim = {
+    el: document.getElementById('sim'),
+    scroll: document.getElementById('simScroll'),
+    task: document.getElementById('simTask'),
+    group: document.getElementById('simGroup'),
+    cluster: document.getElementById('simCluster'),
+    title: document.getElementById('simTitle'),
+    chip: document.getElementById('simChip'),
+    timer: document.getElementById('simTimer'),
+    steps: document.getElementById('simSteps'),
+    answer: document.getElementById('simAnswer'),
+    sources: document.getElementById('simSources'),
+    status: document.getElementById('simStatus'),
+    stop: document.getElementById('simStop'),
+    idx: 0, paused: false, autoPaused: false, visible: true, gen: 0,
+    _t: null, _res: null, _remain: 0, _start: 0,
+    startedAt: 0, elapsedBase: 0, running: false
+  };
+
+  function wait(ms) {
+    return new Promise(function (res) {
+      sim._res = res; sim._remain = ms; sim._start = performance.now();
+      sim._t = setTimeout(res, ms);
+    });
+  }
+  function pauseWait() {
+    if (sim._t) { clearTimeout(sim._t); sim._t = null; sim._remain -= performance.now() - sim._start; }
+  }
+  function resumeWait() {
+    if (!sim._t && sim._res) { sim._start = performance.now(); sim._t = setTimeout(sim._res, sim._remain); }
+  }
+
+  function setPaused(p, auto) {
+    if (sim.paused === p) return;
+    sim.paused = p;
+    if (!auto) sim.autoPaused = false; else sim.autoPaused = p;
+    sim.el.classList.toggle('paused', p);
+    if (p) {
+      pauseWait();
+      if (sim.running) { sim.elapsedBase += (performance.now() - sim.startedAt) / 1000; sim.running = false; }
+      sim.status.textContent = t('sim.paused');
+    }
+    else {
+      sim.status.textContent = sim.el.classList.contains('finished-task') ? t('sim.done') : t('sim.working');
+      sim.running = !sim.el.classList.contains('finished-task');
+      if (sim.running) sim.startedAt = performance.now();
+      resumeWait();
+    }
+  }
+
+  sim.stop.addEventListener('click', function () { setPaused(!sim.paused, false); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { if (!sim.paused) setPaused(true, true); }
+    else if (sim.autoPaused && sim.visible) setPaused(false, true);
+  });
+
+  /* 离开视口自动暂停，回来自动继续 */
+  new IntersectionObserver(function (entries) {
+    sim.visible = entries[0].isIntersecting;
+    if (!sim.visible) { if (!sim.paused) setPaused(true, true); }
+    else if (sim.autoPaused && !document.hidden) setPaused(false, true);
+  }, { threshold: 0.15 }).observe(sim.el);
+
+  /* 计时器：仅在运行且可见时刷新 */
+  (function tick() {
+    requestAnimationFrame(tick);
+    if (!sim.running || sim.paused) return;
+    sim.timer.textContent = Math.round(sim.elapsedBase + (performance.now() - sim.startedAt) / 1000) + 's';
+  })();
+
+  function el(htmlStr) {
+    var d = document.createElement('div');
+    d.innerHTML = htmlStr.trim();
+    return d.firstChild;
+  }
+
+  /* 流式跟随：新内容出现即滚到最新 */
+  function follow(instant) {
+    sim.scroll.scrollTo({ top: sim.scroll.scrollHeight, behavior: (reduced || instant) ? 'auto' : 'smooth' });
+  }
+
+  function stepRow(step) {
+    return el('<div class="sim-step enter">' +
+      '<span class="sim-step-icon">' + ICONS[step.icon] + '</span>' +
+      '<span class="sim-step-label">' + step.label + '</span>' +
+      '<span class="sim-step-state"><span class="sim-spinner"></span></span>' +
+      '</div>');
+  }
+
+  function finishStep(row) {
+    row.classList.add('finished');
+    row.querySelector('.sim-step-state').innerHTML =
+      '<svg class="sim-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path pathLength="1" d="M20 6 9 17l-5-5"/></svg>' +
+      '<span>' + (html.dataset.lang === 'zh' ? '完成' : 'Done') + '</span>';
+  }
+
+  function startClock() {
+    sim.elapsedBase = 0; sim.startedAt = performance.now(); sim.running = true;
+    sim.timer.textContent = '0s';
+  }
+  function stopClock() {
+    sim.elapsedBase += (performance.now() - sim.startedAt) / 1000;
+    sim.running = false;
+  }
+
+  async function runTask(gen) {
+    var lang = html.dataset.lang === 'zh' ? 'zh' : 'en';
+    var task = TASKS[lang][sim.idx % TASKS[lang].length];
+    sim.el.classList.add('run'); sim.el.classList.remove('finished-task');
+    sim.group.classList.remove('done');
+    sim.scroll.classList.remove('fading');
+    sim.steps.innerHTML = ''; sim.answer.innerHTML = '';
+    sim.sources.style.display = 'none';
+    sim.scroll.scrollTop = 0;
+    sim.task.style.opacity = '0'; sim.task.style.transform = 'translateY(10px)';
+    sim.group.style.opacity = '0'; sim.group.style.transform = 'translateY(10px)';
+
+    /* 任务气泡 */
+    sim.task.textContent = task.user;
+    var icons = [];
+    task.steps.forEach(function (s) { if (icons.indexOf(s.icon) < 0) icons.push(s.icon); });
+    sim.cluster.innerHTML = icons.slice(0, 3).map(function (i) { return '<span>' + ICONS[i] + '</span>'; }).join('');
+    sim.chip.textContent = task.steps.length + (lang === 'zh' ? ' 步' : ' steps');
+    sim.title.textContent = task.steps[0].label;
+    sim.status.textContent = t('sim.working');
+    startClock();
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        sim.task.style.opacity = ''; sim.task.style.transform = '';
+        sim.group.style.opacity = ''; sim.group.style.transform = '';
+      });
+    });
+
+    await wait(650); if (gen !== sim.gen) return;
+
+    for (var i = 0; i < task.steps.length; i++) {
+      var row = stepRow(task.steps[i]);
+      sim.steps.appendChild(row);
+      sim.title.textContent = task.steps[i].label;
+      follow();
+      requestAnimationFrame(function () { requestAnimationFrame(function () { row.classList.remove('enter'); }); });
+      await wait(task.steps[i].t);
+      if (gen !== sim.gen) return;
+      finishStep(row);
+      await wait(240);
+      if (gen !== sim.gen) return;
+    }
+
+    /* 完成态 */
+    stopClock();
+    sim.group.classList.add('done');
+    sim.title.textContent = (lang === 'zh' ? '已完成 ' : 'Completed ') + task.steps.length + (lang === 'zh' ? ' 步' : ' steps');
+    sim.el.classList.add('finished-task');
+    sim.status.textContent = t('sim.done');
+
+    task.answer.forEach(function (line, i) {
+      var l = el('<div class="a-line enter ' + (line.strong ? 'a-strong' : '') + '">' + line.text + '</div>');
+      sim.answer.appendChild(l);
+      setTimeout(function () { l.classList.remove('enter'); }, 60 + i * 110);
+    });    sim.sources.innerHTML = ICONS.globe + '<span>' + task.src + '</span><span class="src-n">' +
+      task.sources + (lang === 'zh' ? ' 个来源' : (task.sources > 1 ? ' sources' : ' source')) + '</span>';
+    sim.sources.style.display = '';
+    sim.sources.classList.add('enter');
+    setTimeout(function () { sim.sources.classList.remove('enter'); }, 60 + task.answer.length * 110);
+    follow();
+
+    await wait(3600); if (gen !== sim.gen) return;
+
+    /* 淡出，进入下一任务 */
+    sim.scroll.classList.add('fading');
+    await wait(480); if (gen !== sim.gen) return;
+    sim.idx++;
+    runTask(gen);
+  }
+
+  function startSim() {
+    sim.gen++;
+    if (reduced) { renderStaticSim(); return; }
+    runTask(sim.gen);
+  }
+
+  /* 减弱动效：静态展示一个完成态任务 */
+  function renderStaticSim() {
+    var lang = html.dataset.lang === 'zh' ? 'zh' : 'en';
+    var task = TASKS[lang][0];
+    sim.el.classList.remove('run'); sim.el.classList.add('finished-task');
+    sim.group.classList.add('done');
+    sim.task.textContent = task.user;
+    sim.steps.innerHTML = ''; sim.answer.innerHTML = '';
+    task.steps.forEach(function (s) {
+      var row = stepRow(s); row.classList.remove('enter'); finishStep(row); sim.steps.appendChild(row);
+    });
+    var icons = [];
+    task.steps.forEach(function (s) { if (icons.indexOf(s.icon) < 0) icons.push(s.icon); });
+    sim.cluster.innerHTML = icons.slice(0, 3).map(function (i) { return '<span>' + ICONS[i] + '</span>'; }).join('');
+    sim.chip.textContent = task.steps.length + (lang === 'zh' ? ' 步' : ' steps');
+    sim.title.textContent = (lang === 'zh' ? '已完成 ' : 'Completed ') + task.steps.length + (lang === 'zh' ? ' 步' : ' steps');
+    sim.timer.textContent = '7s';
+    sim.status.textContent = t('sim.done');
+    task.answer.forEach(function (line) {
+      sim.answer.appendChild(el('<div class="a-line ' + (line.strong ? 'a-strong' : '') + '">' + line.text + '</div>'));
+    });
+    sim.sources.innerHTML = ICONS.globe + '<span>' + task.src + '</span><span class="src-n">' +
+      task.sources + (lang === 'zh' ? ' 个来源' : ' source') + '</span>';
+    sim.sources.style.display = '';
+    sim.stop.style.display = 'none';
+  }
+
+  /* ================= 语言切换 ================= */
+  document.getElementById('langToggle').addEventListener('click', function () {
+    var next = html.dataset.lang === 'zh' ? 'en' : 'zh';
+    html.dataset.lang = next;
+    try { localStorage.setItem('taber-lang', next); } catch (e) {}
+    applyI18n();
+    startSim();
+  });
+
+  /* ================= 导航滚动态 ==================== */
+  var nav = document.getElementById('nav');
+  addEventListener('scroll', function () {
+    nav.classList.toggle('scrolled', scrollY > 24);
+  }, { passive: true });
+
+  /* ================= 滚动 reveal ================= */
+  var rvIO;
+  if ('IntersectionObserver' in window) {
+    rvIO = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add('in'); rvIO.unobserve(e.target); }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+    document.querySelectorAll('.rv').forEach(function (n) { rvIO.observe(n); });
+    var __doc = document.getElementById('docOuter');
+    if (__doc) rvIO.observe(__doc);
+  } else {
+    document.querySelectorAll('.rv').forEach(function (n) { n.classList.add('in'); });
+  }
+
+  /* ================= 指针视差 + 3D 倾斜(仅精确指针) ==================== */
+  var fine = window.matchMedia('(pointer: fine)').matches;
+  var dots = document.getElementById('dots');
+  var tiltEl = document.getElementById('simTilt');
+  if (fine && !reduced) {
+    var mx = 0, my = 0, cx = 0, cy = 0;
+    addEventListener('pointermove', function (e) {
+      mx = (e.clientX / innerWidth - 0.5); my = (e.clientY / innerHeight - 0.5);
+    }, { passive: true });
+    (function drift() {
+      requestAnimationFrame(drift);
+      cx += (mx - cx) * 0.045; cy += (my - cy) * 0.045;
+      dots.style.transform = 'translate3d(' + (cx * -18) + 'px,' + (cy * -12) + 'px,0)';
+    })();
+    var trx = 0, tryy = 0, crx = 0, cryy = 0;
+    addEventListener('pointermove', function (e) {
+      var r = tiltEl.getBoundingClientRect();
+      var dx = (e.clientX - (r.left + r.width / 2)) / innerWidth;
+      var dy = (e.clientY - (r.top + r.height / 2)) / innerHeight;
+      tryy = Math.max(-5, Math.min(5, dx * 9));
+      trx = Math.max(-4, Math.min(4, -dy * 8));
+    }, { passive: true });
+    document.addEventListener('pointerleave', function () { trx = 0; tryy = 0; });
+    (function tiltLoop() {
+      requestAnimationFrame(tiltLoop);
+      crx += (trx - crx) * 0.06; cryy += (tryy - cryy) * 0.06;
+      if (Math.abs(crx) < 0.02 && Math.abs(cryy) < 0.02) { tiltEl.style.transform = ''; return; }
+      tiltEl.style.transform = 'rotateX(' + crx.toFixed(2) + 'deg) rotateY(' + cryy.toFixed(2) + 'deg)';
+    })();
+  }
+
+  /* ================= 滚动编排(全设备) ==================== */
+  var heroCopy = document.getElementById('heroCopy');
+  var simWrapEl = document.getElementById('simWrap');
+  var cursorOuter = document.getElementById('cursorOuter');
+  var demoFrame = document.querySelector('.demo-frame');
+  var docOuter = document.getElementById('docOuter');
+  var paras = Array.prototype.slice.call(document.querySelectorAll('[data-para]'));
+
+  /* 入场动画结束后释放 transform 控制权交给滚动编排 */
+  [simWrapEl, cursorOuter].forEach(function (n) {
+    if (n) n.addEventListener('animationend', function () { n.style.animation = 'none'; }, { once: true });
+  });
+
+  if (!reduced) {
+    var scrTick = false;
+    var scrUpdate = function () {
+      scrTick = false;
+      var vh = innerHeight;
+      var y = scrollY;
+      /* Hero 退场:文案上浮淡出,面板下沉缩放,光标旋走 */
+      var p = Math.min(1, Math.max(0, y / (vh * 0.85)));
+      if (p > 0) {
+        heroCopy.style.transform = 'translateY(' + (p * 56).toFixed(1) + 'px)';
+        heroCopy.style.opacity = String(1 - p * 0.85);
+        simWrapEl.style.transform = 'translateY(' + (p * 110).toFixed(1) + 'px) scale(' + (1 - p * 0.05).toFixed(3) + ')';
+        cursorOuter.style.transform = 'translateY(' + (p * 150).toFixed(1) + 'px) rotate(' + (-p * 22).toFixed(1) + 'deg)';
+      } else {
+        heroCopy.style.transform = ''; heroCopy.style.opacity = '';
+        simWrapEl.style.transform = ''; cursorOuter.style.transform = '';
+      }
+      /* 演示视频:进入视口时缩放上浮到位 */
+      if (demoFrame) {
+        var dr = demoFrame.getBoundingClientRect();
+        var dp = Math.min(1, Math.max(0, 1 - (dr.top - vh * 0.12) / (vh * 0.55)));
+        if (dp < 1) demoFrame.style.transform = 'translateY(' + ((1 - dp) * 42).toFixed(1) + 'px) scale(' + (0.94 + dp * 0.06).toFixed(3) + ')';
+        else demoFrame.style.transform = '';
+      }
+      /* 3D 文档:随滚动旋转 */
+      if (docOuter) {
+        var qr = docOuter.getBoundingClientRect();
+        var prog = (qr.top + qr.height / 2 - vh / 2) / vh;
+        docOuter.style.transform = 'rotate(' + (prog * 9).toFixed(2) + 'deg)';
+      }
+      /* 截图视差 + 微旋转 */
+      paras.forEach(function (n) {
+        var r = n.getBoundingClientRect();
+        var off = (r.top + r.height / 2 - vh / 2) * parseFloat(n.dataset.para);
+        n.style.transform = 'translate3d(0,' + (-off).toFixed(1) + 'px,0) rotate(' + (-off * 0.06).toFixed(2) + 'deg)';
+      });
+    };
+    addEventListener('scroll', function () {
+      if (!scrTick) { scrTick = true; requestAnimationFrame(scrUpdate); }
+    }, { passive: true });
+    scrUpdate();
+  }
+
+  /* ================= 视频懒播放 ================= */
+  var video = document.getElementById('demoVideo');
+  new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { video.play().catch(function () {}); }
+      else video.pause();
+    });
+  }, { threshold: 0.25 }).observe(video);
+
+  /* ================= 启动 ==================== */
+  applyI18n();
+  if (html.dataset.lang === 'zh') { /* applyI18n 已处理 */ }
+  requestAnimationFrame(function () {
+    html.classList.add('ready');
+    startSim();
+  });
+})();
+</script>
+</body>
+</html>
