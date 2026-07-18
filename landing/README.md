@@ -13,8 +13,10 @@ cd landing && python3 -m http.server 8765
 
 ## 部署
 
-整个 `landing/` 目录即为完整站点(约 1.5MB),可投放任意静态托管(GitHub Pages / Vercel / Netlify / OSS)。
-部署后将 `index.html` 中 `og:image` 改为绝对 URL。
+已绑定 Vercel 项目 `taber-landing`(root directory = `landing`,git 集成 Suge8/taber `main` 分支):
+推送到 `main` 即自动部署。生产地址:**https://taber-landing.vercel.app**
+
+手动部署任意静态托管时,整个 `landing/` 目录即为完整站点(约 1.6MB)。
 
 ## 页面结构(营销优先级排序)
 
